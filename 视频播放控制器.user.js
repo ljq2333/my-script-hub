@@ -1,13 +1,16 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.6
+// @version      0.7
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_xmlhttpRequest
 // @run-at       document-idle
+// @downloadURL  https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
+// @updateURL    https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
 // ==/UserScript==
 
 (function () {
