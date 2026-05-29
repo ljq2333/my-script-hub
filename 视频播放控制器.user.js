@@ -74,6 +74,7 @@
     // UI样式
     STYLE: {
       PANEL: 'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:12px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:move;user-select:none;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1)',
+      PANEL_VERT: 'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:8px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;cursor:move;user-select:none;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);width:85px;align-items:center',
       FLOAT_BTN: "position:fixed;z-index:99998;right:15px;bottom:15px;padding:8px 16px;border:1px solid #555;border-radius:6px;background:#555;color:#fff;cursor:pointer;display:none",
       HEADER_ROW: "display:flex;justify-content:space-between;align-items:center;margin-bottom:-4px",
       SETTING_BTN: "background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 2px;line-height:1",
@@ -103,6 +104,7 @@
       UI_LABEL: "min-width:70px;color:#aaa;font-size:13px",
       UI_INPUT: "width:80px;padding:4px 8px;background:#222;border:1px solid #555;border-radius:4px;color:#fff;font-size:13px",
       UI_RANGE: "flex:1;accent-color:#3498db",
+      ADD_BTN: "padding:4px 10px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:13px;margin-top:6px",
       BTN_ROW: "display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:15px;border-top:1px solid #333",
       BTN_GROUP: "display:flex;gap:8px",
       SAVE_BTN: "padding:8px 20px;background:#27ae60;border:none;border-radius:6px;color:#fff;cursor:pointer;font-weight:500",
