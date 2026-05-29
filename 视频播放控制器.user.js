@@ -7,7 +7,6 @@
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
-// @grant        GM_xmlhttpRequest
 // @run-at       document-idle
 // @downloadURL  https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
 // @updateURL    https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
@@ -25,14 +24,11 @@
       HIDE_PANEL: "Hide",
       SHOW_PANEL: "Show",
       SETTINGS_TITLE: "⚙️ 参数设置",
-      SPEED_LABEL: "播放倍速",
       SEEK_LABEL: "快进/快退（秒）",
       UI_LABEL: "界面样式",
       SAVE: "保存配置",
       CANCEL: "取消",
       RESET: "恢复默认",
-      ADD: "+ 添加",
-      REMOVE: "✕",
       SEEK_LABELS: {
         "-600": "-10m",
         "-60": "-1m",
@@ -63,8 +59,6 @@
     },
     // 验证规则
     VALIDATORS: {
-      speed: { min: 0.1, max: 16, step: 0.05, type: "number" },
-      seek: { min: -3600, max: 3600, step: 1, type: "integer" },
       opacity: { min: 0.3, max: 1, step: 0.05 },
       fontSize: { min: 12, max: 24, step: 1 },
       brightness: { min: 0.1, max: 2, step: 0.05 },
@@ -79,90 +73,51 @@
     INIT_DELAY: 800,
     // UI样式
     STYLE: {
-      PANEL:
-        'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:12px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;cursor:move;user-select:none;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);transition:opacity .2s',
-      PANEL_VERT:
-        'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:8px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;cursor:move;user-select:none;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);transition:opacity .2s;width:85px;align-items:center',
-      FLOAT_BTN:
-        "position:fixed;z-index:99998;right:15px;bottom:15px;padding:8px 16px;border:1px solid #555;border-radius:6px;background:#555;color:#fff;cursor:pointer;box-shadow:0 2px 10px rgba(0,0,0,.3);display:none",
-      HEADER_ROW:
-        "display:flex;justify-content:space-between;align-items:center;margin-bottom:-4px",
-      SETTING_BTN:
-        "background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 2px;line-height:1",
-      HIDE_BTN:
-        "padding:3px 10px;border:1px solid #666;border-radius:4px;background:#444;color:#ddd;cursor:pointer;font-size:12px",
+      PANEL: 'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:12px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:move;user-select:none;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1)',
+      FLOAT_BTN: "position:fixed;z-index:99998;right:15px;bottom:15px;padding:8px 16px;border:1px solid #555;border-radius:6px;background:#555;color:#fff;cursor:pointer;display:none",
+      HEADER_ROW: "display:flex;justify-content:space-between;align-items:center;margin-bottom:-4px",
+      SETTING_BTN: "background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 2px;line-height:1",
+      HIDE_BTN: "padding:3px 10px;border:1px solid #666;border-radius:4px;background:#444;color:#ddd;cursor:pointer;font-size:12px",
       TIME_ROW: "display:flex;align-items:center;gap:8px;min-width:320px",
       CURRENT_TIME: "min-width:45px",
       TOTAL_TIME: "color:#aaa",
       PROGRESS: "flex:1;height:6px;cursor:pointer;accent-color:#4CAF50",
       SEEK_ROW: "display:flex;justify-content:center;gap:6px;flex-wrap:wrap",
-      SEEK_BTN:
-        "padding:4px 10px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#fff;cursor:pointer;transition:background .2s;font-size:13px",
+      SEEK_BTN: "padding:4px 10px;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:13px",
       SEEK_BTN_HOVER: "#444",
-      ACTION_ROW:
-        "display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap",
-      SPEED_BTN:
-        "padding:3px 8px;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:12px;min-width:36px",
+      ACTION_ROW: "display:flex;justify-content:flex-end;align-items:center;gap:6px;flex-wrap:wrap",
+      SPEED_BTN: "padding:3px 8px;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:12px;min-width:36px",
       SPEED_BTN_ACTIVE: "#2196F3",
-      PLAY_BTN:
-        "padding:5px 14px;border:none;border-radius:5px;color:#fff;cursor:pointer;font-weight:500",
+      PLAY_BTN: "padding:5px 14px;border:none;border-radius:5px;color:#fff;cursor:pointer;font-weight:500",
       PLAY_COLOR: "#28a745",
       PAUSE_COLOR: "#dc3545",
-      SEEK_NOTICE:
-        "position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:4px 12px;border-radius:6px;z-index:999999;font-size:14px;opacity:0;transition:opacity .2s;white-space:nowrap;box-shadow:0 2px 8px rgba(0,0,0,.3)",
-      OVERLAY:
-        "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000000;display:flex;justify-content:center;align-items:center;backdrop-filter:blur(2px)",
-      DIALOG:
-        "background:#1a1a2e;color:#eee;padding:20px;border-radius:12px;min-width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.6);border:1px solid #333",
-      DIALOG_HEADER:
-        "display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;padding-bottom:10px;border-bottom:1px solid #333",
+      SEEK_NOTICE: "position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:4px 12px;border-radius:6px;z-index:999999;font-size:14px;opacity:0;transition:opacity .2s;white-space:nowrap",
+      OVERLAY: "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000000;display:flex;justify-content:center;align-items:center",
+      DIALOG: "background:#1a1a2e;color:#eee;padding:20px;border-radius:12px;min-width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.6);border:1px solid #333",
+      DIALOG_HEADER: "display:flex;justify-content:space-between;align-items:center;margin-bottom:15px;padding-bottom:10px;border-bottom:1px solid #333",
       DIALOG_TITLE: "margin:0;font-size:18px;color:#fff",
-      DIALOG_CLOSE:
-        "background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;padding:0 5px",
-      SECTION:
-        "margin-bottom:18px;padding:12px;background:#252540;border-radius:8px",
-      SECTION_TITLE:
-        "margin:0 0 10px;font-size:15px;color:#7ed6df;display:flex;align-items:center;gap:6px",
-      LIST_CONTAINER: "display:flex;flex-wrap:wrap;gap:8px;min-height:36px",
-      LIST_ITEM:
-        "display:flex;align-items:center;gap:4px;padding:4px 8px;background:#333;border-radius:5px;border:1px solid #444",
-      LIST_INPUT:
-        "width:60px;padding:3px 6px;background:#222;border:1px solid #555;border-radius:3px;color:#fff;font-size:13px;text-align:center",
-      LIST_INPUT_INVALID: "border-color:#e74c3c;background:#3a2525",
-      LIST_BTN:
-        "padding:2px 6px;background:#e74c3c;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:12px;line-height:1",
-      ADD_BTN:
-        "padding:4px 10px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:13px;margin-top:6px",
-      ADD_BTN_HOVER: "#2980b9",
+      DIALOG_CLOSE: "background:none;border:none;color:#aaa;font-size:20px;cursor:pointer;padding:0 5px",
+      SECTION: "margin-bottom:18px;padding:12px;background:#252540;border-radius:8px",
+      SECTION_TITLE: "margin:0 0 10px;font-size:15px;color:#7ed6df;display:flex;align-items:center;gap:6px",
       UI_ROW: "display:flex;align-items:center;gap:12px;margin:8px 0",
       UI_LABEL: "min-width:70px;color:#aaa;font-size:13px",
-      UI_INPUT:
-        "width:80px;padding:4px 8px;background:#222;border:1px solid #555;border-radius:4px;color:#fff;font-size:13px",
+      UI_INPUT: "width:80px;padding:4px 8px;background:#222;border:1px solid #555;border-radius:4px;color:#fff;font-size:13px",
       UI_RANGE: "flex:1;accent-color:#3498db",
-      BTN_ROW:
-        "display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:15px;border-top:1px solid #333",
+      BTN_ROW: "display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:15px;border-top:1px solid #333",
       BTN_GROUP: "display:flex;gap:8px",
-      SAVE_BTN:
-        "padding:8px 20px;background:#27ae60;border:none;border-radius:6px;color:#fff;cursor:pointer;font-weight:500",
+      SAVE_BTN: "padding:8px 20px;background:#27ae60;border:none;border-radius:6px;color:#fff;cursor:pointer;font-weight:500",
       SAVE_BTN_HOVER: "#219653",
-      CANCEL_BTN:
-        "padding:8px 20px;background:#555;border:none;border-radius:6px;color:#fff;cursor:pointer",
-      RESET_BTN:
-        "padding:8px 16px;background:#e67e22;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px",
-      TOAST:
-        "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(39,174,96,.95);color:#fff;padding:10px 20px;border-radius:8px;z-index:1000001;font-size:14px;box-shadow:0 4px 15px rgba(0,0,0,.3);opacity:0;transition:opacity .3s;pointer-events:none",
+      CANCEL_BTN: "padding:8px 20px;background:#555;border:none;border-radius:6px;color:#fff;cursor:pointer",
+      RESET_BTN: "padding:8px 16px;background:#e67e22;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px",
+      TOAST: "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(39,174,96,.95);color:#fff;padding:10px 20px;border-radius:8px;z-index:1000001;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none",
       BRIGHTNESS_ROW: "display:flex;align-items:center;gap:8px;padding:6px 0",
       BRIGHTNESS_INPUT: "flex:1;height:6px;cursor:pointer;accent-color:#FFD700",
-      BRIGHTNESS_VAL:
-        "min-width:40px;text-align:right;color:#FFD700;font-size:13px",
-      BRIGHTNESS_RESET:
-        "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
+      BRIGHTNESS_VAL: "min-width:40px;text-align:right;color:#FFD700;font-size:13px",
+      BRIGHTNESS_RESET: "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
       VOLUME_ROW: "display:flex;align-items:center;gap:8px;padding:6px 0",
       VOLUME_INPUT: "flex:1;height:6px;cursor:pointer;accent-color:#3498db",
-      VOLUME_VAL:
-        "min-width:40px;text-align:right;color:#3498db;font-size:13px",
-      VOLUME_RESET:
-        "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
+      VOLUME_VAL: "min-width:40px;text-align:right;color:#3498db;font-size:13px",
+      VOLUME_RESET: "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
     },
   };
 
@@ -179,9 +134,6 @@
     floatBtn = null,
     actionDiv = null,
     curSpeedBtn = null,
-    dragging = false,
-    offsetX,
-    offsetY,
     visible = true,
     lastPos = { x: "10px", y: "10px" },
     exists = false,
@@ -189,7 +141,6 @@
     totalSeek = 0,
     observer = null,
     settingsOverlay = null,
-    dragHandlers = null,
     settingsKeyHandler = null,
     isVertical = false;
   let cfg = {
@@ -305,16 +256,6 @@
     setTimeout(() => {
       toast.style.opacity = "0";
     }, 2000);
-  }
-
-  function validateNumber(val, rules) {
-    const num = rules.type === "integer" ? parseInt(val, 10) : parseFloat(val);
-    if (isNaN(num)) return { valid: false, value: null };
-    if (num < rules.min || num > rules.max) return { valid: false, value: num };
-    return {
-      valid: true,
-      value: rules.type === "integer" ? Math.round(num) : num,
-    };
   }
 
   // ==================== 视频查找 ====================
@@ -664,18 +605,47 @@
     GM_setValue(P + "_visible", visible);
   }
 
+  function setupDrag(el) {
+    let dragging = false, ox, oy;
+    const start = (cx, cy) => {
+      const rect = el.getBoundingClientRect();
+      ox = cx - rect.left;
+      oy = cy - rect.top;
+      dragging = true;
+      el.style.cursor = "grabbing";
+      el.style.transition = "none";
+    };
+    const move = (cx, cy) => {
+      if (!dragging) return;
+      const rect = el.getBoundingClientRect();
+      let nx = cx - ox, ny = cy - oy;
+      nx = Math.max(5, Math.min(nx, innerWidth - rect.width - 5));
+      ny = Math.max(5, Math.min(ny, innerHeight - rect.height - 5));
+      el.style.left = nx + "px";
+      el.style.top = ny + "px";
+    };
+    const end = () => {
+      if (!dragging) return;
+      dragging = false;
+      el.style.cursor = "move";
+      el.style.transition = "";
+      lastPos = { x: el.style.left, y: el.style.top };
+      GM_setValue(P + "_pos", JSON.stringify(lastPos));
+    };
+    el.addEventListener("mousedown", (e) => { if (!isInteractive(e.target)) start(e.clientX, e.clientY); });
+    document.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
+    document.addEventListener("mouseup", end);
+    el.addEventListener("touchstart", (e) => { if (!isInteractive(e.target) && e.touches.length === 1) { e.preventDefault(); start(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
+    document.addEventListener("touchmove", (e) => { if (dragging && e.touches.length === 1) { e.preventDefault(); move(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
+    document.addEventListener("touchend", end);
+    el.addEventListener("selectstart", (e) => e.preventDefault());
+  }
+
   function rebuildPanel() {
     if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
     if (floatBtn && floatBtn.parentNode) floatBtn.parentNode.removeChild(floatBtn);
     const seekNotice = document.getElementById(P + "-seek");
     if (seekNotice && seekNotice.parentNode) seekNotice.parentNode.removeChild(seekNotice);
-    if (dragHandlers) {
-      document.removeEventListener("mousemove", dragHandlers.onMouseMove);
-      document.removeEventListener("mouseup", dragHandlers.endDrag);
-      document.removeEventListener("touchmove", dragHandlers.onTouchMove);
-      document.removeEventListener("touchend", dragHandlers.endDrag);
-      dragHandlers = null;
-    }
     controls = null;
     floatBtn = null;
     progress = null;
@@ -840,53 +810,7 @@
         }
       } catch (e) {}
 
-      const startDrag = (cx, cy) => {
-        const rect = controls.getBoundingClientRect();
-        offsetX = cx - rect.left;
-        offsetY = cy - rect.top;
-        dragging = true;
-        controls.style.cursor = "grabbing";
-        controls.style.transition = "none";
-      };
-      const doDrag = (cx, cy) => {
-        if (!dragging) return;
-        let nx = cx - offsetX, ny = cy - offsetY;
-        const rect = controls.getBoundingClientRect();
-        nx = Math.max(5, Math.min(nx, innerWidth - rect.width - 5));
-        ny = Math.max(5, Math.min(ny, innerHeight - rect.height - 5));
-        controls.style.left = nx + "px";
-        controls.style.top = ny + "px";
-      };
-      const endDrag = () => {
-        if (!dragging) return;
-        dragging = false;
-        controls.style.cursor = "move";
-        controls.style.transition = "";
-        lastPos = { x: controls.style.left, y: controls.style.top };
-        GM_setValue(P + "_pos", JSON.stringify(lastPos));
-      };
-      const onMouseMove = (e) => doDrag(e.clientX, e.clientY);
-      const onTouchMove = (e) => {
-        if (dragging && e.touches.length === 1) {
-          e.preventDefault();
-          doDrag(e.touches[0].clientX, e.touches[0].clientY);
-        }
-      };
-      dragHandlers = { startDrag, doDrag, endDrag, onMouseMove, onTouchMove };
-      controls.addEventListener("mousedown", (e) => {
-        if (!isInteractive(e.target)) startDrag(e.clientX, e.clientY);
-      });
-      document.addEventListener("mousemove", onMouseMove);
-      document.addEventListener("mouseup", endDrag);
-      controls.addEventListener("touchstart", (e) => {
-        if (!isInteractive(e.target) && e.touches.length === 1) {
-          e.preventDefault();
-          startDrag(e.touches[0].clientX, e.touches[0].clientY);
-        }
-      }, { passive: false });
-      document.addEventListener("touchmove", onTouchMove, { passive: false });
-      document.addEventListener("touchend", endDrag);
-      controls.addEventListener("selectstart", (e) => e.preventDefault());
+      setupDrag(controls);
       return;
     }
 
@@ -1107,65 +1031,7 @@
     } catch (e) {}
 
     // 拖拽事件
-    const startDrag = (cx, cy) => {
-      const rect = controls.getBoundingClientRect();
-      offsetX = cx - rect.left;
-      offsetY = cy - rect.top;
-      dragging = true;
-      controls.style.cursor = "grabbing";
-      controls.style.transition = "none";
-    };
-    const doDrag = (cx, cy) => {
-      if (!dragging) return;
-      let nx = cx - offsetX,
-        ny = cy - offsetY;
-      const rect = controls.getBoundingClientRect();
-      nx = Math.max(5, Math.min(nx, innerWidth - rect.width - 5));
-      ny = Math.max(5, Math.min(ny, innerHeight - rect.height - 5));
-      controls.style.left = nx + "px";
-      controls.style.top = ny + "px";
-    };
-    const endDrag = () => {
-      if (!dragging) return;
-      dragging = false;
-      controls.style.cursor = "move";
-      controls.style.transition = "";
-      lastPos = { x: controls.style.left, y: controls.style.top };
-      GM_setValue(P + "_pos", JSON.stringify(lastPos));
-    };
-
-    const onMouseMove = (e) => doDrag(e.clientX, e.clientY);
-    const onTouchMove = (e) => {
-      if (dragging && e.touches.length === 1) {
-        e.preventDefault();
-        doDrag(e.touches[0].clientX, e.touches[0].clientY);
-      }
-    };
-    dragHandlers = { startDrag, doDrag, endDrag, onMouseMove, onTouchMove };
-
-    controls.addEventListener("mousedown", (e) => {
-      if (!isInteractive(e.target)) startDrag(e.clientX, e.clientY);
-    });
-    document.addEventListener("mousemove", onMouseMove);
-    document.addEventListener("mouseup", endDrag);
-
-    controls.addEventListener(
-      "touchstart",
-      (e) => {
-        if (!isInteractive(e.target) && e.touches.length === 1) {
-          e.preventDefault();
-          startDrag(e.touches[0].clientX, e.touches[0].clientY);
-        }
-      },
-      { passive: false },
-    );
-    document.addEventListener(
-      "touchmove",
-      onTouchMove,
-      { passive: false },
-    );
-    document.addEventListener("touchend", endDrag);
-    controls.addEventListener("selectstart", (e) => e.preventDefault());
+    setupDrag(controls);
   }
 
   // ==================== 视频事件绑定 ====================
@@ -1220,13 +1086,6 @@
       controls.parentNode.removeChild(controls);
     if (floatBtn && floatBtn.parentNode)
       floatBtn.parentNode.removeChild(floatBtn);
-    if (dragHandlers) {
-      document.removeEventListener("mousemove", dragHandlers.onMouseMove);
-      document.removeEventListener("mouseup", dragHandlers.endDrag);
-      document.removeEventListener("touchmove", dragHandlers.onTouchMove);
-      document.removeEventListener("touchend", dragHandlers.endDrag);
-      dragHandlers = null;
-    }
     if (settingsKeyHandler) {
       document.removeEventListener("keydown", settingsKeyHandler);
       settingsKeyHandler = null;
