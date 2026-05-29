@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.7
+// @version      0.8
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
