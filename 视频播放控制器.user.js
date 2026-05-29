@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.8
+// @version      0.8.1
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
@@ -222,6 +222,12 @@
     }, 1500);
   }
 
+  function updateTotalTime() {
+    if (totalTime && videoEl && isFinite(videoEl.duration) && videoEl.duration > 0) {
+      totalTime.textContent = "/ " + formatTime(videoEl.duration);
+    }
+  }
+
   function updateProgress() {
     if (
       videoEl &&
@@ -234,6 +240,8 @@
         Math.max(0, (videoEl.currentTime / videoEl.duration) * 10000),
       );
       curTime.textContent = formatTime(videoEl.currentTime);
+      // 顺便更新总时长，作为 loadedmetadata 没触发的兜底
+      updateTotalTime();
     }
   }
 
@@ -1053,10 +1061,13 @@
     if (!videoEl) return;
     videoEl.addEventListener("loadedmetadata", () => {
       L("metadata loaded");
-      if (totalTime && isFinite(videoEl.duration))
-        totalTime.textContent = "/ " + formatTime(videoEl.duration);
+      updateTotalTime();
       updateProgress();
       updateSpeedHighlight();
+    });
+    videoEl.addEventListener("durationchange", () => {
+      L("duration changed");
+      updateTotalTime();
     });
     videoEl.addEventListener("timeupdate", updateProgress);
     videoEl.addEventListener("play", () => {
@@ -1119,6 +1130,12 @@
     L(`Video: ${(videoEl.src || "").slice(0, 50) || "<inline>"}`);
     createControls();
     setupListeners();
+    // 如果视频元数据已经加载完成，立即更新总时长
+    if (videoEl.readyState >= 1) {
+      updateTotalTime();
+      updateProgress();
+      updateSpeedHighlight();
+    }
   }
 
   function start() {
