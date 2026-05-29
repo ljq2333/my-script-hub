@@ -738,10 +738,16 @@
       progRow.appendChild(progress);
       contentWrap.appendChild(progRow);
 
-      curTime = document.createElement("div");
-      curTime.style.cssText = "text-align:center;font-size:11px;color:#ccc;width:100%";
+      curTime = document.createElement("span");
+      curTime.style.cssText = "text-align:center;font-size:11px;color:#ccc";
       curTime.textContent = "00:00";
-      contentWrap.appendChild(curTime);
+      totalTime = document.createElement("span");
+      totalTime.style.cssText = "text-align:center;font-size:11px;color:#888";
+      totalTime.textContent = " / 00:00";
+      const timeRow = document.createElement("div");
+      timeRow.style.cssText = "text-align:center;width:100%";
+      timeRow.append(curTime, totalTime);
+      contentWrap.appendChild(timeRow);
 
       const btnGrid = document.createElement("div");
       btnGrid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%";
