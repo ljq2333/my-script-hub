@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.8.2
+// @version      0.9.0
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
@@ -149,6 +149,8 @@
     speeds: [...CONFIG.DEFAULT_SPEEDS],
     seeks: [...CONFIG.DEFAULT_SEEKS],
     ui: { ...CONFIG.DEFAULT_UI },
+    positionMode: "proportional",
+    proportionalPos: { x: 0.5, y: 0.5 },
   };
 
   // ==================== 工具函数 ====================
@@ -164,6 +166,8 @@
           ? p.seeks
           : [...CONFIG.DEFAULT_SEEKS];
         cfg.ui = { ...CONFIG.DEFAULT_UI, ...(p.ui || {}) };
+        cfg.positionMode = p.positionMode || "proportional";
+        cfg.proportionalPos = p.proportionalPos || { x: 0.5, y: 0.5 };
       }
     } catch (e) {
       L("Config load error: " + e);
@@ -266,6 +270,24 @@
     setTimeout(() => {
       toast.style.opacity = "0";
     }, 2000);
+  }
+
+  function applyPosition() {
+    if (!controls) return;
+    if (cfg.positionMode === "proportional") {
+      const rect = controls.getBoundingClientRect();
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      let left = vw * cfg.proportionalPos.x - rect.width / 2;
+      let top = vh * cfg.proportionalPos.y - rect.height / 2;
+      left = Math.max(0, Math.min(left, vw - rect.width));
+      top = Math.max(0, Math.min(top, vh - rect.height));
+      controls.style.left = left + "px";
+      controls.style.top = top + "px";
+    } else {
+      controls.style.left = lastPos.x;
+      controls.style.top = lastPos.y;
+    }
   }
 
   // ==================== 视频查找 ====================
@@ -462,25 +484,107 @@
     });
     btnSizeRow.append(btnSizeLabel, btnSizeInput, btnSizeVal);
 
-    // 位置重置
-    const posRow = document.createElement("div");
-    posRow.style.cssText = CONFIG.STYLE.UI_ROW;
-    const posBtn = document.createElement("button");
-    posBtn.textContent = "📍 重置面板位置";
-    posBtn.style.cssText = CONFIG.STYLE.ADD_BTN.replace("margin-top:6px", "");
-    posBtn.style.width = "100%";
-    posBtn.addEventListener("click", () => {
-      lastPos = { x: CONFIG.DEFAULT_UI.panelX, y: CONFIG.DEFAULT_UI.panelY };
+    uiSection.append(uiTitle, opacityRow, fontRow, btnSizeRow);
+
+    // ============ 定位方式区域 ============
+    const posModeSection = document.createElement("div");
+    posModeSection.style.cssText = CONFIG.STYLE.SECTION;
+    const posModeTitle = document.createElement("h4");
+    posModeTitle.textContent = "📌 定位方式";
+    posModeTitle.style.cssText = CONFIG.STYLE.SECTION_TITLE;
+
+    const modeRow = document.createElement("div");
+    modeRow.style.cssText = "display:flex;gap:16px;margin:8px 0";
+    const absLabel = document.createElement("label");
+    absLabel.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px";
+    const absRadio = document.createElement("input");
+    absRadio.type = "radio";
+    absRadio.name = P + "-posMode";
+    absRadio.value = "absolute";
+    absRadio.checked = cfg.positionMode === "absolute";
+    absLabel.append(absRadio, "绝对位置（像素）");
+    const propLabel = document.createElement("label");
+    propLabel.style.cssText = "display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px";
+    const propRadio = document.createElement("input");
+    propRadio.type = "radio";
+    propRadio.name = P + "-posMode";
+    propRadio.value = "proportional";
+    propRadio.checked = cfg.positionMode === "proportional";
+    propLabel.append(propRadio, "相对位置（比例）");
+    modeRow.append(absLabel, propLabel);
+
+    const propBox = document.createElement("div");
+    propBox.style.cssText = "margin-top:10px;" + (cfg.positionMode === "absolute" ? "display:none" : "");
+
+    const pxRow = document.createElement("div");
+    pxRow.style.cssText = CONFIG.STYLE.UI_ROW;
+    const pxLabel = document.createElement("span");
+    pxLabel.textContent = "水平:";
+    pxLabel.style.cssText = CONFIG.STYLE.UI_LABEL;
+    const pxInput = document.createElement("input");
+    pxInput.type = "number";
+    pxInput.min = 0;
+    pxInput.max = 1;
+    pxInput.step = 0.01;
+    pxInput.value = cfg.proportionalPos.x;
+    pxInput.style.cssText = CONFIG.STYLE.UI_INPUT;
+    const pxVal = document.createElement("span");
+    pxVal.textContent = Math.round(cfg.proportionalPos.x * 100) + "%";
+    pxVal.style.cssText = "min-width:40px;text-align:right;color:#7ed6df";
+    pxInput.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(1, parseFloat(pxInput.value) || 0));
+      pxVal.textContent = Math.round(v * 100) + "%";
+    });
+    pxRow.append(pxLabel, pxInput, pxVal);
+
+    const pyRow = document.createElement("div");
+    pyRow.style.cssText = CONFIG.STYLE.UI_ROW;
+    const pyLabel = document.createElement("span");
+    pyLabel.textContent = "垂直:";
+    pyLabel.style.cssText = CONFIG.STYLE.UI_LABEL;
+    const pyInput = document.createElement("input");
+    pyInput.type = "number";
+    pyInput.min = 0;
+    pyInput.max = 1;
+    pyInput.step = 0.01;
+    pyInput.value = cfg.proportionalPos.y;
+    pyInput.style.cssText = CONFIG.STYLE.UI_INPUT;
+    const pyVal = document.createElement("span");
+    pyVal.textContent = Math.round(cfg.proportionalPos.y * 100) + "%";
+    pyVal.style.cssText = "min-width:40px;text-align:right;color:#7ed6df";
+    pyInput.addEventListener("input", () => {
+      const v = Math.max(0, Math.min(1, parseFloat(pyInput.value) || 0));
+      pyVal.textContent = Math.round(v * 100) + "%";
+    });
+    pyRow.append(pyLabel, pyInput, pyVal);
+
+    propBox.append(pxRow, pyRow);
+
+    absRadio.addEventListener("change", () => {
+      if (!absRadio.checked) return;
+      propBox.style.display = "none";
       if (controls) {
+        const rect = controls.getBoundingClientRect();
+        lastPos.x = Math.max(0, Math.round((window.innerWidth - rect.width) / 2)) + "px";
+        lastPos.y = Math.max(0, Math.round((window.innerHeight - rect.height) / 2)) + "px";
         controls.style.left = lastPos.x;
         controls.style.top = lastPos.y;
-        GM_setValue(P + "_pos", JSON.stringify(lastPos));
-        showToast("面板位置已重置");
       }
     });
-    posRow.appendChild(posBtn);
+    propRadio.addEventListener("change", () => {
+      if (!propRadio.checked) return;
+      propBox.style.display = "block";
+      pxInput.value = 0.5;
+      pyInput.value = 0.5;
+      pxVal.textContent = "50%";
+      pyVal.textContent = "50%";
+      if (controls) {
+        cfg.proportionalPos = { x: 0.5, y: 0.5 };
+        applyPosition();
+      }
+    });
 
-    uiSection.append(uiTitle, opacityRow, fontRow, btnSizeRow, posRow);
+    posModeSection.append(posModeTitle, modeRow, propBox);
 
     // 按钮区域
     const btnRow = document.createElement("div");
@@ -532,7 +636,7 @@
     btnRow.append(resetBtn, btnGroup);
 
     // 组装对话框
-    dlg.append(header, uiSection, btnRow);
+    dlg.append(header, uiSection, posModeSection, btnRow);
     settingsOverlay.appendChild(dlg);
 
     // 关闭逻辑
@@ -560,9 +664,28 @@
       cfg.ui.fontSize = parseInt(fontInput.value);
       cfg.ui.btnSize = parseInt(btnSizeInput.value);
 
+      // 更新定位方式
+      const newMode = document.querySelector(`input[name="${P}-posMode"]:checked`).value;
+      if (newMode !== cfg.positionMode) {
+        cfg.positionMode = newMode;
+        if (newMode === "proportional") {
+          cfg.proportionalPos = { x: 0.5, y: 0.5 };
+        } else {
+          if (controls) {
+            const rect = controls.getBoundingClientRect();
+            lastPos.x = Math.max(0, Math.round((window.innerWidth - rect.width) / 2)) + "px";
+            lastPos.y = Math.max(0, Math.round((window.innerHeight - rect.height) / 2)) + "px";
+          }
+        }
+      } else if (cfg.positionMode === "proportional") {
+        cfg.proportionalPos.x = Math.max(0, Math.min(1, parseFloat(pxInput.value) || 0.5));
+        cfg.proportionalPos.y = Math.max(0, Math.min(1, parseFloat(pyInput.value) || 0.5));
+      }
+
       // 保存并应用
       saveConfig();
       GM_setValue(P + "_pos", JSON.stringify(lastPos));
+      applyPosition();
 
       // 实时应用更改
       if (controls) {
@@ -639,8 +762,19 @@
       dragging = false;
       el.style.cursor = "move";
       el.style.transition = "";
-      lastPos = { x: el.style.left, y: el.style.top };
-      GM_setValue(P + "_pos", JSON.stringify(lastPos));
+      if (cfg.positionMode === "proportional") {
+        const rect = el.getBoundingClientRect();
+        const cx = parseFloat(el.style.left) + rect.width / 2;
+        const cy = parseFloat(el.style.top) + rect.height / 2;
+        cfg.proportionalPos.x = Math.round((cx / window.innerWidth) * 100) / 100;
+        cfg.proportionalPos.y = Math.round((cy / window.innerHeight) * 100) / 100;
+        cfg.proportionalPos.x = Math.max(0, Math.min(1, cfg.proportionalPos.x));
+        cfg.proportionalPos.y = Math.max(0, Math.min(1, cfg.proportionalPos.y));
+        saveConfig();
+      } else {
+        lastPos = { x: el.style.left, y: el.style.top };
+        GM_setValue(P + "_pos", JSON.stringify(lastPos));
+      }
     };
     el.addEventListener("mousedown", (e) => { if (!isInteractive(e.target)) start(e.clientX, e.clientY); });
     document.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
@@ -681,8 +815,6 @@
         const s = GM_getValue(P + "_pos");
         if (s) lastPos = JSON.parse(s);
       } catch (e) {}
-      controls.style.left = lastPos.x;
-      controls.style.top = lastPos.y;
 
       const dragHandle = document.createElement("div");
       dragHandle.style.cssText = "width:40px;height:4px;background:#666;border-radius:2px;cursor:grab;margin:0 auto 6px";
@@ -826,6 +958,7 @@
         }
       } catch (e) {}
 
+      applyPosition();
       setupDrag(controls);
       return;
     }
@@ -842,8 +975,6 @@
       const s = GM_getValue(P + "_pos");
       if (s) lastPos = JSON.parse(s);
     } catch (e) {}
-    controls.style.left = lastPos.x;
-    controls.style.top = lastPos.y;
 
     const dragHandle = document.createElement("div");
     dragHandle.style.cssText = "width:40px;height:4px;background:#666;border-radius:2px;cursor:grab;margin:0 auto 6px";
@@ -1046,6 +1177,7 @@
       }
     } catch (e) {}
 
+    applyPosition();
     // 拖拽事件
     setupDrag(controls);
   }
@@ -1163,6 +1295,9 @@
       }
     });
     observer.observe(document.body, { childList: true, subtree: true });
+    window.addEventListener("resize", () => {
+      if (controls) applyPosition();
+    });
     window.addEventListener("beforeunload", cleanup);
   }
 
