@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.9.0
+// @version      0.9.1
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
@@ -39,6 +39,7 @@
       },
       BRIGHTNESS_BTN: "☀️",
       VOLUME_BTN: "🔊",
+      REFRESH_BTN: "🔄",
       TOAST: {
         SAVED: "✓ 配置已保存",
         RESET: "✓ 已恢复默认值",
@@ -145,6 +146,7 @@
     settingsOverlay = null,
     settingsKeyHandler = null,
     isVertical = false;
+  let manualRefresh = false; // 防止手动刷新与 MutationObserver 冲突
   let cfg = {
     speeds: [...CONFIG.DEFAULT_SPEEDS],
     seeks: [...CONFIG.DEFAULT_SEEKS],
@@ -1028,7 +1030,27 @@
       e.stopPropagation();
       toggleVisibility();
     });
-    headerRow.append(setBtn, layoutBtn, brightBtn, volBtn, hidePanelBtn);
+    const refreshBtn = document.createElement("button");
+    refreshBtn.innerHTML = "🔄";
+    refreshBtn.title = "重新检测视频";
+    refreshBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
+    refreshBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      L("Refresh: start scan");
+      manualRefresh = true;
+      cleanup();
+      L("Refresh: cleanup done, re-init...");
+      init();
+      if (videoEl && controls) {
+        L(`Refresh: ok -> ${(videoEl.src || "<inline>").slice(0, 60)}`);
+        showToast("✓ 已重新绑定视频");
+      } else {
+        L("Refresh: no video found");
+        showToast("未找到可控制的视频", "error");
+      }
+      manualRefresh = false;
+    });
+    headerRow.append(setBtn, layoutBtn, brightBtn, volBtn, refreshBtn, hidePanelBtn);
     controls.appendChild(headerRow);
 
     // 亮度滑块行
@@ -1227,10 +1249,6 @@
   // ==================== 清理与初始化 ====================
   function cleanup() {
     L("Cleaning");
-    if (observer) {
-      observer.disconnect();
-      observer = null;
-    }
     if (settingsOverlay && settingsOverlay.parentNode)
       settingsOverlay.parentNode.removeChild(settingsOverlay);
     if (controls && controls.parentNode)
@@ -1274,6 +1292,21 @@
       updateProgress();
       updateSpeedHighlight();
     }
+    // 确保 MutationObserver 活跃（SPA 页面切换后不会被清理断开）
+    if (!observer) {
+      observer = new MutationObserver(() => {
+        if (manualRefresh) return;
+        if (!videoEl || !document.body.contains(videoEl)) {
+          const newVid = findVideo();
+          if (newVid && newVid !== videoEl) {
+            L("New video detected");
+            cleanup();
+            setTimeout(init, 300);
+          }
+        }
+      });
+      observer.observe(document.body, { childList: true, subtree: true });
+    }
   }
 
   function start() {
@@ -1285,6 +1318,7 @@
       setTimeout(init, CONFIG.INIT_DELAY);
     }
     observer = new MutationObserver(() => {
+      if (manualRefresh) return;
       if (!videoEl || !document.body.contains(videoEl)) {
         const newVid = findVideo();
         if (newVid && newVid !== videoEl) {
