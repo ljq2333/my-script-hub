@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.9.1
+// @version      0.9.2
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
@@ -147,6 +147,9 @@
     settingsKeyHandler = null,
     isVertical = false;
   let manualRefresh = false; // 防止手动刷新与 MutationObserver 冲突
+  let isFullscreen = false;
+  let originalParent = null;
+  let fullscreenObserver = null;
   let cfg = {
     speeds: [...CONFIG.DEFAULT_SPEEDS],
     seeks: [...CONFIG.DEFAULT_SEEKS],
@@ -290,6 +293,107 @@
       controls.style.left = lastPos.x;
       controls.style.top = lastPos.y;
     }
+  }
+
+  // ==================== 网页内全屏适配 ====================
+  function detectFullscreenContainer() {
+    if (!videoEl) return null;
+    let container = videoEl.parentElement;
+    while (container && container !== document.body) {
+      const style = window.getComputedStyle(container);
+      const w = container.offsetWidth;
+      const h = container.offsetHeight;
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      if (
+        (style.position === "fixed" || style.position === "absolute") &&
+        w >= vw * 0.9 && h >= vh * 0.9
+      ) {
+        return container;
+      }
+      container = container.parentElement;
+    }
+    return null;
+  }
+
+  function repositionControlsInFullscreen() {
+    if (!controls || !videoEl) return;
+    const container = videoEl.parentElement;
+    if (!container) return;
+    const cw = container.offsetWidth;
+    const ch = container.offsetHeight;
+    const rect = controls.getBoundingClientRect();
+    const panelW = rect.width || 320;
+    const panelH = rect.height || 200;
+    if (cfg.positionMode === "proportional") {
+      let left = cw * cfg.proportionalPos.x - panelW / 2;
+      let top = ch * cfg.proportionalPos.y - panelH / 2;
+      left = Math.max(5, Math.min(left, cw - panelW - 5));
+      top = Math.max(5, Math.min(top, ch - panelH - 5));
+      controls.style.left = left + "px";
+      controls.style.top = top + "px";
+    } else {
+      let left = parseFloat(lastPos.x) || 10;
+      let top = parseFloat(lastPos.y) || 10;
+      left = Math.max(5, Math.min(left, cw - panelW - 5));
+      top = Math.max(5, Math.min(top, ch - panelH - 5));
+      controls.style.left = left + "px";
+      controls.style.top = top + "px";
+    }
+  }
+
+  function enterFullscreen(container) {
+    if (isFullscreen || !controls) return;
+    L("Enter webpage fullscreen");
+    originalParent = document.body;
+    container.appendChild(controls);
+    controls.style.position = "absolute";
+    controls.style.zIndex = "999999";
+    repositionControlsInFullscreen();
+    setupDrag(controls);
+    isFullscreen = true;
+  }
+
+  function exitFullscreen() {
+    if (!isFullscreen || !controls) return;
+    L("Exit webpage fullscreen");
+    if (originalParent) {
+      originalParent.appendChild(controls);
+    } else {
+      document.body.appendChild(controls);
+    }
+    controls.style.position = "fixed";
+    controls.style.zIndex = "99999";
+    applyPosition();
+    setupDrag(controls);
+    isFullscreen = false;
+    originalParent = null;
+  }
+
+  function checkFullscreenState() {
+    const container = detectFullscreenContainer();
+    if (container && !isFullscreen) {
+      enterFullscreen(container);
+    } else if (!container && isFullscreen) {
+      exitFullscreen();
+    } else if (isFullscreen) {
+      repositionControlsInFullscreen();
+    }
+  }
+
+  function setupFullscreenDetection() {
+    if (fullscreenObserver) fullscreenObserver.disconnect();
+    fullscreenObserver = new MutationObserver(() => {
+      if (!videoEl || !document.body.contains(videoEl)) return;
+      checkFullscreenState();
+    });
+    fullscreenObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: ["class", "style"],
+      subtree: true,
+      childList: false,
+    });
+    checkFullscreenState();
   }
 
   // ==================== 视频查找 ====================
@@ -788,6 +892,11 @@
   }
 
   function rebuildPanel() {
+    const wasFullscreen = isFullscreen;
+    if (isFullscreen) {
+      isFullscreen = false;
+      originalParent = null;
+    }
     if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
     if (floatBtn && floatBtn.parentNode) floatBtn.parentNode.removeChild(floatBtn);
     const seekNotice = document.getElementById(P + "-seek");
@@ -802,6 +911,9 @@
     curSpeedBtn = null;
     createControls();
     setupListeners();
+    if (wasFullscreen) {
+      setupFullscreenDetection();
+    }
   }
 
   function createControls() {
@@ -1249,6 +1361,12 @@
   // ==================== 清理与初始化 ====================
   function cleanup() {
     L("Cleaning");
+    if (fullscreenObserver) {
+      fullscreenObserver.disconnect();
+      fullscreenObserver = null;
+    }
+    isFullscreen = false;
+    originalParent = null;
     if (settingsOverlay && settingsOverlay.parentNode)
       settingsOverlay.parentNode.removeChild(settingsOverlay);
     if (controls && controls.parentNode)
@@ -1286,6 +1404,7 @@
     L(`Video: ${(videoEl.src || "").slice(0, 50) || "<inline>"}`);
     createControls();
     setupListeners();
+    setupFullscreenDetection();
     // 如果视频元数据已经加载完成，立即更新总时长
     if (videoEl.readyState >= 1) {
       updateTotalTime();
