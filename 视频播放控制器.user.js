@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         视频播放控制器（增强设置版）
 // @namespace    http://tampermonkey.net/
-// @version      0.9.2
+// @version      0.9.6
 // @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
 // @author       You
 // @match        *://*/*
@@ -35,6 +35,7 @@
         "-10": "-10s",
         10: "+10s",
         60: "+1m",
+        300: "+5m",
         600: "+10m",
       },
       BRIGHTNESS_BTN: "☀️",
@@ -48,7 +49,14 @@
     },
     // 默认配置
     DEFAULT_SPEEDS: [3.0, 2.5, 2.0, 1.5, 1.25, 1.0],
-    DEFAULT_SEEKS: [-600, -60, -10, 10, 60, 600],
+    // 倍速 +/- 按钮的调整步进（可在设置中修改）
+    DEFAULT_SPEED_STEP: 0.5,
+    // 倍速调整范围
+    SPEED_MIN: 0.1,
+    SPEED_MAX: 16,
+    DEFAULT_SEEKS: [-600, -60, -10, 10, 60, 300, 600],
+    // 快进档位版本：新增 +5m 后 +1，用于让旧的本地存档回退到新默认值
+    SEEKS_VERSION: 1,
     DEFAULT_UI: {
       opacity: 0.85,
       fontSize: 14,
@@ -65,6 +73,7 @@
       brightness: { min: 0.1, max: 2, step: 0.05 },
       volume: { min: 0, max: 1, step: 0.05 },
       btnSize: { min: 10, max: 22, step: 1 },
+      speedStep: { min: 0.1, max: 5, step: 0.05 },
     },
     // 最小视频尺寸
     MIN_VIDEO_SIZE: 200,
@@ -137,6 +146,7 @@
     floatBtn = null,
     actionDiv = null,
     curSpeedBtn = null,
+    speedDisplay = null,
     visible = true,
     lastPos = { x: "10px", y: "10px" },
     exists = false,
@@ -152,7 +162,9 @@
   let fullscreenObserver = null;
   let cfg = {
     speeds: [...CONFIG.DEFAULT_SPEEDS],
+    speedStep: CONFIG.DEFAULT_SPEED_STEP,
     seeks: [...CONFIG.DEFAULT_SEEKS],
+    seeksVer: CONFIG.SEEKS_VERSION,
     ui: { ...CONFIG.DEFAULT_UI },
     positionMode: "proportional",
     proportionalPos: { x: 0.5, y: 0.5 },
@@ -167,9 +179,17 @@
         cfg.speeds = Array.isArray(p.speeds)
           ? p.speeds
           : [...CONFIG.DEFAULT_SPEEDS];
-        cfg.seeks = Array.isArray(p.seeks)
-          ? p.seeks
-          : [...CONFIG.DEFAULT_SEEKS];
+        cfg.speedStep =
+          typeof p.speedStep === "number" &&
+          isFinite(p.speedStep) &&
+          p.speedStep > 0
+            ? p.speedStep
+            : CONFIG.DEFAULT_SPEED_STEP;
+        cfg.seeks =
+          Array.isArray(p.seeks) && p.seeksVer === CONFIG.SEEKS_VERSION
+            ? p.seeks
+            : [...CONFIG.DEFAULT_SEEKS];
+        cfg.seeksVer = CONFIG.SEEKS_VERSION;
         cfg.ui = { ...CONFIG.DEFAULT_UI, ...(p.ui || {}) };
         cfg.positionMode = p.positionMode || "proportional";
         cfg.proportionalPos = p.proportionalPos || { x: 0.5, y: 0.5 };
@@ -461,9 +481,63 @@
     });
   }
 
+  // 去掉最大的两档（3.0/2.5），这两个位置由 −/+ 按钮代替
+  function getPresetSpeeds() {
+    return [...cfg.speeds].sort((a, b) => b - a).slice(2);
+  }
+
+  function adjustSpeed(dir) {
+    if (!videoEl) return;
+    const step = cfg.speedStep || CONFIG.DEFAULT_SPEED_STEP;
+    let rate = videoEl.playbackRate + dir * step;
+    rate = Math.max(
+      CONFIG.SPEED_MIN,
+      Math.min(CONFIG.SPEED_MAX, Math.round(rate * 100) / 100),
+    );
+    videoEl.playbackRate = rate;
+  }
+
+  function createSpeedAdjustBtn(dir, style) {
+    const btn = document.createElement("button");
+    btn.textContent = dir > 0 ? "+" : "−";
+    btn.title = dir > 0 ? "增加倍速" : "减少倍速";
+    btn.style.cssText = style;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      adjustSpeed(dir);
+    });
+    return btn;
+  }
+
+  // 当前倍速读数（常驻显示，ratechange 时刷新）
+  function updateSpeedDisplay() {
+    if (!speedDisplay) return;
+    speedDisplay.textContent = videoEl
+      ? parseFloat(videoEl.playbackRate.toFixed(2)) + "x"
+      : "–";
+  }
+
+  function createSpeedDisplay(style) {
+    speedDisplay = document.createElement("span");
+    speedDisplay.id = P + "-speedval";
+    speedDisplay.setAttribute("data-speed-display", "");
+    speedDisplay.style.cssText = style;
+    speedDisplay.textContent = "–";
+    updateSpeedDisplay();
+    return speedDisplay;
+  }
+
   function renderSpeedRow(container) {
     container.innerHTML = "";
-    cfg.speeds.forEach((sp) => {
+    container.appendChild(createSpeedAdjustBtn(-1, CONFIG.STYLE.SPEED_BTN));
+    container.appendChild(
+      createSpeedDisplay(
+        CONFIG.STYLE.SPEED_BTN +
+          ";background:#111;color:#7ed6df;text-align:center;cursor:default",
+      ),
+    );
+    container.appendChild(createSpeedAdjustBtn(1, CONFIG.STYLE.SPEED_BTN));
+    getPresetSpeeds().forEach((sp) => {
       const btn = document.createElement("button");
       btn.textContent = sp + "x";
       btn.dataset.speed = sp;
@@ -581,7 +655,7 @@
       const val = parseInt(btnSizeInput.value);
       btnSizeVal.textContent = val + "px";
       if (controls && isVertical) {
-        controls.querySelectorAll("button").forEach(b => {
+        controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
           b.style.fontSize = val + "px";
         });
         const panelWidth = Math.max(85, val * 6 + 20);
@@ -591,6 +665,32 @@
     btnSizeRow.append(btnSizeLabel, btnSizeInput, btnSizeVal);
 
     uiSection.append(uiTitle, opacityRow, fontRow, btnSizeRow);
+
+    // ============ 倍速设置区域 ============
+    const speedSection = document.createElement("div");
+    speedSection.style.cssText = CONFIG.STYLE.SECTION;
+    const speedTitle = document.createElement("h4");
+    speedTitle.textContent = "🎬 倍速设置";
+    speedTitle.style.cssText = CONFIG.STYLE.SECTION_TITLE;
+
+    const stepRow = document.createElement("div");
+    stepRow.style.cssText = CONFIG.STYLE.UI_ROW;
+    const stepLabel = document.createElement("span");
+    stepLabel.textContent = "调整步进:";
+    stepLabel.style.cssText = CONFIG.STYLE.UI_LABEL;
+    const stepInput = document.createElement("input");
+    stepInput.type = "number";
+    stepInput.min = CONFIG.VALIDATORS.speedStep.min;
+    stepInput.max = CONFIG.VALIDATORS.speedStep.max;
+    stepInput.step = CONFIG.VALIDATORS.speedStep.step;
+    stepInput.value = cfg.speedStep;
+    stepInput.style.cssText = CONFIG.STYLE.UI_INPUT;
+    const stepHint = document.createElement("span");
+    stepHint.textContent = "x（−/+ 每次调整幅度）";
+    stepHint.style.cssText = "color:#888;font-size:12px";
+    stepRow.append(stepLabel, stepInput, stepHint);
+
+    speedSection.append(speedTitle, stepRow);
 
     // ============ 定位方式区域 ============
     const posModeSection = document.createElement("div");
@@ -715,7 +815,7 @@
         btnSizeInput.value = cfg.ui.btnSize;
         btnSizeVal.textContent = cfg.ui.btnSize + "px";
         if (controls && isVertical) {
-          controls.querySelectorAll("button").forEach(b => {
+          controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
             b.style.fontSize = cfg.ui.btnSize + "px";
           });
           const panelWidth = Math.max(85, cfg.ui.btnSize * 6 + 20);
@@ -742,7 +842,7 @@
     btnRow.append(resetBtn, btnGroup);
 
     // 组装对话框
-    dlg.append(header, uiSection, posModeSection, btnRow);
+    dlg.append(header, uiSection, speedSection, posModeSection, btnRow);
     settingsOverlay.appendChild(dlg);
 
     // 关闭逻辑
@@ -769,6 +869,16 @@
       cfg.ui.opacity = parseFloat(opacityInput.value);
       cfg.ui.fontSize = parseInt(fontInput.value);
       cfg.ui.btnSize = parseInt(btnSizeInput.value);
+
+      // 更新倍速步进
+      let stepVal = parseFloat(stepInput.value);
+      if (!isFinite(stepVal) || stepVal <= 0)
+        stepVal = CONFIG.DEFAULT_SPEED_STEP;
+      stepVal = Math.max(
+        CONFIG.VALIDATORS.speedStep.min,
+        Math.min(CONFIG.VALIDATORS.speedStep.max, Math.round(stepVal * 100) / 100),
+      );
+      cfg.speedStep = stepVal;
 
       // 更新定位方式
       const newMode = document.querySelector(`input[name="${P}-posMode"]:checked`).value;
@@ -799,7 +909,7 @@
         controls.style.fontSize = cfg.ui.fontSize + "px";
       }
       if (controls && isVertical) {
-        controls.querySelectorAll("button").forEach(b => {
+        controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
           b.style.fontSize = cfg.ui.btnSize + "px";
         });
         const panelWidth = Math.max(85, cfg.ui.btnSize * 6 + 20);
@@ -909,6 +1019,7 @@
     playBtn = null;
     actionDiv = null;
     curSpeedBtn = null;
+    speedDisplay = null;
     createControls();
     setupListeners();
     if (wasFullscreen) {
@@ -1000,11 +1111,15 @@
 
       const speedCol = document.createElement("div");
       speedCol.style.cssText = "display:flex;flex-direction:column;gap:3px";
-      [...cfg.speeds].reverse().forEach((sp) => {
+      const vsBtnStyle =
+        "padding:4px 0;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:" +
+        cfg.ui.btnSize +
+        "px;text-align:center;flex-shrink:0";
+      [...getPresetSpeeds()].reverse().forEach((sp) => {
         const btn = document.createElement("button");
         btn.textContent = sp + "x";
         btn.dataset.speed = sp;
-        btn.style.cssText = "padding:4px 0;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:" + cfg.ui.btnSize + "px;text-align:center;flex-shrink:0";
+        btn.style.cssText = vsBtnStyle;
         if (videoEl && Math.abs(videoEl.playbackRate - sp) < 0.01) {
           btn.style.background = "#2196F3";
           curSpeedBtn = btn;
@@ -1020,6 +1135,13 @@
         });
         speedCol.appendChild(btn);
       });
+      const vsDisplayStyle =
+        "padding:4px 0;border:1px solid #555;border-radius:4px;background:#111;color:#7ed6df;cursor:default;font-size:" +
+        cfg.ui.btnSize +
+        "px;text-align:center";
+      speedCol.appendChild(createSpeedAdjustBtn(-1, vsBtnStyle));
+      speedCol.appendChild(createSpeedDisplay(vsDisplayStyle));
+      speedCol.appendChild(createSpeedAdjustBtn(1, vsBtnStyle));
       btnGrid.appendChild(speedCol);
 
       const seekCol = document.createElement("div");
@@ -1318,6 +1440,7 @@
 
   // ==================== 视频事件绑定 ====================
   function updateSpeedHighlight() {
+    updateSpeedDisplay();
     if (!actionDiv || !videoEl) return;
     const rate = videoEl.playbackRate;
     actionDiv.querySelectorAll("button[data-speed]").forEach((btn) => {
@@ -1386,6 +1509,7 @@
     floatBtn = null;
     actionDiv = null;
     curSpeedBtn = null;
+    speedDisplay = null;
     settingsOverlay = null;
     exists = false;
   }
