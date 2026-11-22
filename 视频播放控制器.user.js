@@ -1,12 +1,13 @@
 // ==UserScript==
-// @name         视频播放控制器（增强设置版）
+// @name         视频播放控制器
 // @namespace    http://tampermonkey.net/
-// @version      0.9.6
-// @description  可拖拽控制面板，倍速/快进在脚本头部配置，界面样式可自定义调整
+// @version      0.9.9
+// @description  可拖拽控制面板，快进/倍速按钮可增删改排序，竖版快退/快进上下方向可调，一键清空配置
 // @author       You
 // @match        *://*/*
 // @grant        GM_setValue
 // @grant        GM_getValue
+// @grant        GM_deleteValue
 // @run-at       document-idle
 // @downloadURL  https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
 // @updateURL    https://github.com/ljq2333/my-script-hub/raw/main/%E8%A7%86%E9%A2%91%E6%92%AD%E6%94%BE%E6%8E%A7%E5%88%B6%E5%99%A8.user.js
@@ -16,6 +17,9 @@
   "use strict";
 
   // ==================== 自定义配置（可随意修改） ====================
+  const FONT_STACK =
+    '-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif';
+  const PANEL_BASE = `position:fixed;z-index:99999;color:#fff;font-family:${FONT_STACK};cursor:move;user-select:none;display:flex;flex-direction:column;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1)`;
   const CONFIG = {
     // 文字标签
     TEXT: {
@@ -24,11 +28,11 @@
       HIDE_PANEL: "Hide",
       SHOW_PANEL: "Show",
       SETTINGS_TITLE: "⚙️ 参数设置",
-      SEEK_LABEL: "快进/快退（秒）",
       UI_LABEL: "界面样式",
       SAVE: "保存配置",
       CANCEL: "取消",
-      RESET: "恢复默认",
+      CLEAR: "清空配置",
+      INIT: "初始化",
       SEEK_LABELS: {
         "-600": "-10m",
         "-60": "-1m",
@@ -43,8 +47,9 @@
       REFRESH_BTN: "🔄",
       TOAST: {
         SAVED: "✓ 配置已保存",
-        RESET: "✓ 已恢复默认值",
-        INVALID: "⚠ 存在无效值，请修正后保存",
+        CLEARED: "✓ 已清空配置，已恢复脚本默认值",
+        INIT_OK: "✓ 已重新初始化",
+        INIT_FAIL: "未找到可控制的视频",
       },
     },
     // 默认配置
@@ -54,14 +59,21 @@
     // 倍速调整范围
     SPEED_MIN: 0.1,
     SPEED_MAX: 16,
+    // 快进/快退范围（秒）与列表项上限
+    SEEK_MIN: -3600,
+    SEEK_MAX: 3600,
+    MAX_LIST_ITEMS: 12,
     DEFAULT_SEEKS: [-600, -60, -10, 10, 60, 300, 600],
+    // 垂直面板中快进/快退按钮的上下排列：backward=快退在前，forward=快进在前
+    DEFAULT_SEEK_ORDER_V: "backward",
+    // 面板功能区块固定顺序（横/竖面板各自独立）
+    DEFAULT_ORDER_H: ["time", "seek", "speed", "play"],
+    DEFAULT_ORDER_V: ["progress", "time", "speed", "seek", "play"],
     // 快进档位版本：新增 +5m 后 +1，用于让旧的本地存档回退到新默认值
     SEEKS_VERSION: 1,
     DEFAULT_UI: {
       opacity: 0.85,
       fontSize: 14,
-      panelX: "10px",
-      panelY: "10px",
       brightness: 1.0,
       volume: 1.0,
       btnSize: 14,
@@ -83,8 +95,8 @@
     INIT_DELAY: 800,
     // UI样式
     STYLE: {
-      PANEL: 'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:12px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;cursor:move;user-select:none;display:flex;flex-direction:column;gap:10px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1)',
-      PANEL_VERT: 'position:fixed;z-index:99999;background:rgba(0,0,0,.85);color:#fff;padding:8px;border-radius:10px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:14px;cursor:move;user-select:none;display:flex;flex-direction:column;gap:6px;box-shadow:0 4px 20px rgba(0,0,0,.4);border:1px solid rgba(255,255,255,.1);width:85px;align-items:center',
+      PANEL: PANEL_BASE + "background:rgba(0,0,0,.85);padding:12px;border-radius:10px;font-size:14px;gap:10px",
+      PANEL_VERT: PANEL_BASE + "background:rgba(0,0,0,.85);padding:8px;border-radius:10px;font-size:14px;gap:6px;width:85px;align-items:center",
       FLOAT_BTN: "position:fixed;z-index:99998;right:15px;bottom:15px;padding:8px 16px;border:1px solid #555;border-radius:6px;background:#555;color:#fff;cursor:pointer;display:none",
       HEADER_ROW: "display:flex;justify-content:space-between;align-items:center;margin-bottom:-4px",
       SETTING_BTN: "background:none;border:none;color:#aaa;font-size:18px;cursor:pointer;padding:0 2px;line-height:1",
@@ -102,6 +114,12 @@
       PLAY_BTN: "padding:5px 14px;border:none;border-radius:5px;color:#fff;cursor:pointer;font-weight:500",
       PLAY_COLOR: "#28a745",
       PAUSE_COLOR: "#dc3545",
+      SPEED_DISPLAY: "padding:3px 8px;border:1px solid #555;border-radius:4px;background:#111;color:#7ed6df;text-align:center;cursor:default;font-size:12px;min-width:36px",
+      SPEED_BTN_VERT: "padding:4px 0;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;text-align:center;flex-shrink:0;font-size:14px",
+      SPEED_DISPLAY_VERT: "padding:4px 0;border:1px solid #555;border-radius:4px;background:#111;color:#7ed6df;cursor:default;text-align:center;flex-shrink:0;font-size:14px",
+      SEEK_BTN_VERT: "padding:4px 0;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#fff;cursor:pointer;text-align:center;flex-shrink:0;font-size:14px",
+      PLAY_BTN_VERT: "padding:8px 0;border:none;border-radius:5px;color:#fff;cursor:pointer;font-weight:500;width:100%;font-size:16px",
+      VERT_COL: "display:flex;flex-direction:column;gap:3px;width:100%",
       SEEK_NOTICE: "position:absolute;top:-30px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.85);color:#fff;padding:4px 12px;border-radius:6px;z-index:999999;font-size:14px;opacity:0;transition:opacity .2s;white-space:nowrap",
       OVERLAY: "position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,.6);z-index:1000000;display:flex;justify-content:center;align-items:center",
       DIALOG: "background:#1a1a2e;color:#eee;padding:20px;border-radius:12px;min-width:420px;max-width:90vw;max-height:85vh;overflow-y:auto;box-shadow:0 8px 30px rgba(0,0,0,.6);border:1px solid #333",
@@ -114,22 +132,26 @@
       UI_LABEL: "min-width:70px;color:#aaa;font-size:13px",
       UI_INPUT: "width:80px;padding:4px 8px;background:#222;border:1px solid #555;border-radius:4px;color:#fff;font-size:13px",
       UI_RANGE: "flex:1;accent-color:#3498db",
-      ADD_BTN: "padding:4px 10px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:13px;margin-top:6px",
+      ADD_BTN: "padding:5px 12px;background:#3498db;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:13px;margin-top:8px",
+      ITEM_ROW: "display:flex;align-items:center;gap:6px",
+      ITEM_INPUT: "width:90px;padding:4px 8px;background:#222;border:1px solid #555;border-radius:4px;color:#fff;font-size:13px",
+      ITEM_PREVIEW: "min-width:56px;color:#888;font-size:12px",
+      ITEM_MOVE: "padding:3px 8px;background:#3a3a55;border:none;border-radius:4px;color:#ddd;cursor:pointer;font-size:12px",
+      ITEM_DEL: "padding:3px 8px;background:#c0392b;border:none;border-radius:4px;color:#fff;cursor:pointer;font-size:12px",
       BTN_ROW: "display:flex;justify-content:space-between;align-items:center;margin-top:20px;padding-top:15px;border-top:1px solid #333",
       BTN_GROUP: "display:flex;gap:8px",
       SAVE_BTN: "padding:8px 20px;background:#27ae60;border:none;border-radius:6px;color:#fff;cursor:pointer;font-weight:500",
       SAVE_BTN_HOVER: "#219653",
       CANCEL_BTN: "padding:8px 20px;background:#555;border:none;border-radius:6px;color:#fff;cursor:pointer",
-      RESET_BTN: "padding:8px 16px;background:#e67e22;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px",
+      CLEAR_BTN: "padding:8px 16px;background:#c0392b;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px",
+      INIT_BTN: "padding:8px 16px;background:#8e44ad;border:none;border-radius:6px;color:#fff;cursor:pointer;font-size:13px",
       TOAST: "position:fixed;bottom:30px;left:50%;transform:translateX(-50%);background:rgba(39,174,96,.95);color:#fff;padding:10px 20px;border-radius:8px;z-index:1000001;font-size:14px;opacity:0;transition:opacity .3s;pointer-events:none",
-      BRIGHTNESS_ROW: "display:flex;align-items:center;gap:8px;padding:6px 0",
+      SLIDER_ROW: "display:flex;align-items:center;gap:8px;padding:6px 0",
       BRIGHTNESS_INPUT: "flex:1;height:6px;cursor:pointer;accent-color:#FFD700",
       BRIGHTNESS_VAL: "min-width:40px;text-align:right;color:#FFD700;font-size:13px",
-      BRIGHTNESS_RESET: "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
-      VOLUME_ROW: "display:flex;align-items:center;gap:8px;padding:6px 0",
+      SLIDER_RESET: "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
       VOLUME_INPUT: "flex:1;height:6px;cursor:pointer;accent-color:#3498db",
       VOLUME_VAL: "min-width:40px;text-align:right;color:#3498db;font-size:13px",
-      VOLUME_RESET: "padding:2px 8px;background:#555;border:none;border-radius:3px;color:#fff;cursor:pointer;font-size:11px;line-height:1.4",
     },
   };
 
@@ -144,12 +166,9 @@
     totalTime = null,
     playBtn = null,
     floatBtn = null,
-    actionDiv = null,
-    curSpeedBtn = null,
     speedDisplay = null,
     visible = true,
     lastPos = { x: "10px", y: "10px" },
-    exists = false,
     seekTimer = null,
     totalSeek = 0,
     observer = null,
@@ -159,12 +178,20 @@
   let manualRefresh = false; // 防止手动刷新与 MutationObserver 冲突
   let isFullscreen = false;
   let originalParent = null;
+  let fullscreenContainer = null;
   let fullscreenObserver = null;
+  let dragDetach = null; // 上一组拖拽监听器的解绑函数，避免重复绑定
+  let listenerAC = null; // 视频事件监听器的 AbortController
+  let videoCheckTimer = null; // MutationObserver 触发的视频检测防抖定时器
+  let lastVideoScan = 0; // 上次全量扫描视频的时间，限制扫描频率
+  let fsCheckPending = false; // 全屏检测的 rAF 节流标记
+  let toastTimer = null;
   let cfg = {
     speeds: [...CONFIG.DEFAULT_SPEEDS],
     speedStep: CONFIG.DEFAULT_SPEED_STEP,
     seeks: [...CONFIG.DEFAULT_SEEKS],
     seeksVer: CONFIG.SEEKS_VERSION,
+    seekOrderV: CONFIG.DEFAULT_SEEK_ORDER_V,
     ui: { ...CONFIG.DEFAULT_UI },
     positionMode: "proportional",
     proportionalPos: { x: 0.5, y: 0.5 },
@@ -174,26 +201,72 @@
   function loadConfig() {
     try {
       const s = GM_getValue(P + "_cfg");
-      if (s) {
-        const p = JSON.parse(s);
-        cfg.speeds = Array.isArray(p.speeds)
-          ? p.speeds
-          : [...CONFIG.DEFAULT_SPEEDS];
-        cfg.speedStep =
-          typeof p.speedStep === "number" &&
-          isFinite(p.speedStep) &&
-          p.speedStep > 0
-            ? p.speedStep
-            : CONFIG.DEFAULT_SPEED_STEP;
-        cfg.seeks =
-          Array.isArray(p.seeks) && p.seeksVer === CONFIG.SEEKS_VERSION
-            ? p.seeks
-            : [...CONFIG.DEFAULT_SEEKS];
-        cfg.seeksVer = CONFIG.SEEKS_VERSION;
-        cfg.ui = { ...CONFIG.DEFAULT_UI, ...(p.ui || {}) };
-        cfg.positionMode = p.positionMode || "proportional";
-        cfg.proportionalPos = p.proportionalPos || { x: 0.5, y: 0.5 };
+      if (!s) return;
+      const p = JSON.parse(s) || {};
+      const clamp = (v, rule, fallback) =>
+        typeof v === "number" && isFinite(v)
+          ? Math.max(rule.min, Math.min(rule.max, v))
+          : fallback;
+
+      // 倍速候选：过滤损坏值、去重、限制数量，全部无效时回退默认
+      const speeds = [];
+      if (Array.isArray(p.speeds)) {
+        for (const v of p.speeds) {
+          if (typeof v !== "number" || !isFinite(v)) continue;
+          if (v < CONFIG.SPEED_MIN || v > CONFIG.SPEED_MAX) continue;
+          const value = Math.round(v * 100) / 100;
+          if (speeds.some((x) => Math.abs(x - value) < 1e-9)) continue;
+          speeds.push(value);
+          if (speeds.length >= CONFIG.MAX_LIST_ITEMS) break;
+        }
       }
+      cfg.speeds = speeds.length ? speeds : [...CONFIG.DEFAULT_SPEEDS];
+      cfg.speedStep = clamp(
+        p.speedStep,
+        CONFIG.VALIDATORS.speedStep,
+        CONFIG.DEFAULT_SPEED_STEP,
+      );
+
+      const seeks = [];
+      if (Array.isArray(p.seeks) && p.seeksVer === CONFIG.SEEKS_VERSION) {
+        for (const v of p.seeks) {
+          if (typeof v !== "number" || !isFinite(v) || v === 0) continue;
+          if (v < CONFIG.SEEK_MIN || v > CONFIG.SEEK_MAX) continue;
+          const value = Math.round(v);
+          if (seeks.some((x) => Math.abs(x - value) < 1e-9)) continue;
+          seeks.push(value);
+          if (seeks.length >= CONFIG.MAX_LIST_ITEMS) break;
+        }
+      }
+      cfg.seeks = seeks.length ? seeks : [...CONFIG.DEFAULT_SEEKS];
+      cfg.seeksVer = CONFIG.SEEKS_VERSION;
+      cfg.seekOrderV =
+        p.seekOrderV === "forward" ? "forward" : CONFIG.DEFAULT_SEEK_ORDER_V;
+
+      const ui = p.ui && typeof p.ui === "object" ? p.ui : {};
+      cfg.ui = {
+        opacity: clamp(ui.opacity, CONFIG.VALIDATORS.opacity, CONFIG.DEFAULT_UI.opacity),
+        fontSize: Math.round(
+          clamp(ui.fontSize, CONFIG.VALIDATORS.fontSize, CONFIG.DEFAULT_UI.fontSize),
+        ),
+        brightness: clamp(
+          ui.brightness,
+          CONFIG.VALIDATORS.brightness,
+          CONFIG.DEFAULT_UI.brightness,
+        ),
+        volume: clamp(ui.volume, CONFIG.VALIDATORS.volume, CONFIG.DEFAULT_UI.volume),
+        btnSize: Math.round(
+          clamp(ui.btnSize, CONFIG.VALIDATORS.btnSize, CONFIG.DEFAULT_UI.btnSize),
+        ),
+      };
+
+      cfg.positionMode =
+        p.positionMode === "absolute" ? "absolute" : "proportional";
+      const pp = p.proportionalPos;
+      cfg.proportionalPos = {
+        x: typeof pp?.x === "number" && isFinite(pp.x) ? Math.max(0, Math.min(1, pp.x)) : 0.5,
+        y: typeof pp?.y === "number" && isFinite(pp.y) ? Math.max(0, Math.min(1, pp.y)) : 0.5,
+      };
     } catch (e) {
       L("Config load error: " + e);
     }
@@ -207,6 +280,48 @@
     } catch (e) {
       L("Config save error: " + e);
     }
+  }
+
+  // 清空本地存档并把内存配置恢复为脚本内 CONFIG 的默认值
+  function clearAllConfig() {
+    try {
+      GM_deleteValue(P + "_cfg");
+      GM_deleteValue(P + "_pos");
+      GM_deleteValue(P + "_layout");
+      GM_deleteValue(P + "_visible");
+    } catch (e) {
+      L("Config clear error: " + e);
+    }
+    cfg = {
+      speeds: [...CONFIG.DEFAULT_SPEEDS],
+      speedStep: CONFIG.DEFAULT_SPEED_STEP,
+      seeks: [...CONFIG.DEFAULT_SEEKS],
+      seeksVer: CONFIG.SEEKS_VERSION,
+      seekOrderV: CONFIG.DEFAULT_SEEK_ORDER_V,
+      ui: { ...CONFIG.DEFAULT_UI },
+      positionMode: "proportional",
+      proportionalPos: { x: 0.5, y: 0.5 },
+    };
+    isVertical = false;
+    visible = true;
+    lastPos = { x: "10px", y: "10px" };
+    // 撤销脚本此前对视频元素做的亮度/音量覆盖
+    if (videoEl) {
+      videoEl.style.filter = "";
+      videoEl.volume = CONFIG.DEFAULT_UI.volume;
+    }
+  }
+
+  // 读取上次保存的绝对位置，校验格式避免写入无效样式
+  function loadSavedPos() {
+    try {
+      const s = GM_getValue(P + "_pos");
+      if (!s) return;
+      const p = JSON.parse(s);
+      if (p && typeof p.x === "string" && typeof p.y === "string") {
+        lastPos = { x: p.x, y: p.y };
+      }
+    } catch (e) {}
   }
 
   function formatTime(t, isSeek) {
@@ -229,6 +344,24 @@
         .toString()
         .padStart(2, "0");
     return h === "00" ? `${m}:${s}` : `${h}:${m}:${s}`;
+  }
+
+  // 快进按钮文案：优先用内置标签，其余按秒/分自动格式化
+  function formatSeekLabel(v) {
+    if (!isFinite(v)) return "—";
+    if (CONFIG.TEXT.SEEK_LABELS[v]) return CONFIG.TEXT.SEEK_LABELS[v];
+    const abs = Math.abs(v);
+    const sign = v < 0 ? "-" : "+";
+    if (abs >= 60) {
+      const m = Math.floor(abs / 60);
+      const s = abs % 60;
+      return sign + m + "m" + (s ? s + "s" : "");
+    }
+    return sign + abs + "s";
+  }
+
+  function formatSpeedLabel(v) {
+    return isFinite(v) ? parseFloat(v.toFixed(2)) + "x" : "—";
   }
 
   function showSeek(amount) {
@@ -268,7 +401,7 @@
         10000,
         Math.max(0, (videoEl.currentTime / videoEl.duration) * 10000),
       );
-      curTime.textContent = formatTime(videoEl.currentTime);
+      if (curTime) curTime.textContent = formatTime(videoEl.currentTime);
       // 顺便更新总时长，作为 loadedmetadata 没触发的兜底
       updateTotalTime();
     }
@@ -281,18 +414,22 @@
   }
 
   function showToast(msg, type = "success") {
+    const host =
+      (isFullscreen && fullscreenContainer) || document.body;
+    if (!host) return;
     let toast = document.getElementById(P + "-toast");
     if (!toast) {
       toast = document.createElement("div");
       toast.id = P + "-toast";
       toast.style.cssText = CONFIG.STYLE.TOAST;
-      document.body.appendChild(toast);
     }
+    if (toast.parentNode !== host) host.appendChild(toast);
     toast.textContent = msg;
     toast.style.background =
       type === "error" ? "rgba(231,76,60,.95)" : "rgba(39,174,96,.95)";
     toast.style.opacity = "1";
-    setTimeout(() => {
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => {
       toast.style.opacity = "0";
     }, 2000);
   }
@@ -315,9 +452,24 @@
     }
   }
 
+  function applyUiConfig() {
+    if (!controls) return;
+    controls.style.background = `rgba(0,0,0,${cfg.ui.opacity})`;
+    controls.style.fontSize = cfg.ui.fontSize + "px";
+    if (isVertical) {
+      controls.querySelectorAll("button, [data-speed-display]").forEach((b) => {
+        b.style.fontSize = cfg.ui.btnSize + "px";
+      });
+      controls.style.width = Math.max(85, cfg.ui.btnSize * 6 + 20) + "px";
+    }
+  }
+
   // ==================== 网页内全屏适配 ====================
   function detectFullscreenContainer() {
     if (!videoEl) return null;
+    // 优先识别浏览器原生全屏（Fullscreen API）
+    const native = getNativeFullscreenContainer();
+    if (native && native.ownerDocument === document) return native;
     let container = videoEl.parentElement;
     while (container && container !== document.body) {
       const style = window.getComputedStyle(container);
@@ -338,7 +490,7 @@
 
   function repositionControlsInFullscreen() {
     if (!controls || !videoEl) return;
-    const container = videoEl.parentElement;
+    const container = fullscreenContainer || videoEl.parentElement;
     if (!container) return;
     const cw = container.offsetWidth;
     const ch = container.offsetHeight;
@@ -362,11 +514,22 @@
     }
   }
 
+  function moveFloatingUI(host) {
+    if (floatBtn) host.appendChild(floatBtn);
+    if (settingsOverlay) host.appendChild(settingsOverlay);
+  }
+
   function enterFullscreen(container) {
-    if (isFullscreen || !controls) return;
+    if (isFullscreen || !controls || !container) return;
+    // 视频本身无法容纳子节点；跨文档（iframe）容器也不能挂载
+    if (container.tagName === "VIDEO") container = container.parentElement;
+    if (!container || container.ownerDocument !== controls.ownerDocument) return;
     L("Enter webpage fullscreen");
-    originalParent = document.body;
+    originalParent = controls.parentNode || document.body;
+    fullscreenContainer = container;
     container.appendChild(controls);
+    // 浮动按钮和设置层也一起移入全屏层，否则隐藏后无法恢复
+    moveFloatingUI(container);
     controls.style.position = "absolute";
     controls.style.zIndex = "999999";
     repositionControlsInFullscreen();
@@ -382,12 +545,14 @@
     } else {
       document.body.appendChild(controls);
     }
+    moveFloatingUI(document.body);
     controls.style.position = "fixed";
     controls.style.zIndex = "99999";
     applyPosition();
     setupDrag(controls);
     isFullscreen = false;
     originalParent = null;
+    fullscreenContainer = null;
   }
 
   function checkFullscreenState() {
@@ -403,10 +568,7 @@
 
   function setupFullscreenDetection() {
     if (fullscreenObserver) fullscreenObserver.disconnect();
-    fullscreenObserver = new MutationObserver(() => {
-      if (!videoEl || !document.body.contains(videoEl)) return;
-      checkFullscreenState();
-    });
+    fullscreenObserver = new MutationObserver(scheduleFullscreenCheck);
     fullscreenObserver.observe(document.body, {
       attributes: true,
       attributeFilter: ["class", "style"],
@@ -416,9 +578,42 @@
     checkFullscreenState();
   }
 
+  // 样式类 mutation 可能非常频繁，用 rAF 合并为每帧一次全屏检测
+  function scheduleFullscreenCheck() {
+    if (fsCheckPending) return;
+    fsCheckPending = true;
+    requestAnimationFrame(() => {
+      fsCheckPending = false;
+      if (!videoEl || !document.body.contains(videoEl)) return;
+      checkFullscreenState();
+    });
+  }
+
+  // 浏览器原生全屏（Fullscreen API）时，面板必须挂到全屏元素内，否则会被全屏层遮住
+  function getNativeFullscreenContainer() {
+    const el =
+      document.fullscreenElement || document.webkitFullscreenElement || null;
+    if (!el || el === document.body) return null;
+    // 视频元素本身不能容纳子节点，退到其父容器
+    return el.tagName === "VIDEO" ? el.parentElement : el;
+  }
+
+  function handleNativeFullscreen() {
+    if (!controls) return;
+    const target = getNativeFullscreenContainer();
+    if (target) {
+      if (isFullscreen) exitFullscreen();
+      enterFullscreen(target);
+    } else {
+      if (isFullscreen) exitFullscreen();
+      checkFullscreenState();
+    }
+  }
+
   // ==================== 视频查找 ====================
   function findVideo() {
     let candidates = [];
+    const focusedVideo = document.querySelector("video:focus");
     const collect = (doc, ctxScore = 0) => {
       try {
         doc.querySelectorAll("video").forEach((v) => {
@@ -427,12 +622,12 @@
             v.offsetHeight < CONFIG.MIN_VIDEO_SIZE
           )
             return;
-          if (!v.src && !v.querySelector("source")) return;
+          if (!v.src && !v.srcObject && !v.querySelector("source")) return;
           let score = ctxScore;
           if (v.hasAttribute("controls")) score += 10;
           if (v.hasAttribute("autoplay")) score += 5;
           if (v.paused === false) score += 15;
-          if (v === document.querySelector("video:focus")) score += 20;
+          if (v === focusedVideo) score += 20;
           score += Math.min((v.offsetWidth * v.offsetHeight) / 10000, 30);
           candidates.push({ video: v, score });
         });
@@ -459,31 +654,26 @@
   }
 
   // ==================== UI构建 ====================
-  function renderSeekRow(container) {
-    container.innerHTML = "";
-    cfg.seeks.forEach((val) => {
-      const btn = document.createElement("button");
-      btn.textContent =
-        CONFIG.TEXT.SEEK_LABELS[val] ||
-        (val >= 0 ? "+" + val + "s" : val + "s");
-      btn.style.cssText = CONFIG.STYLE.SEEK_BTN;
-      btn.onmouseenter = () =>
-        (btn.style.background = CONFIG.STYLE.SEEK_BTN_HOVER);
-      btn.onmouseleave = () => (btn.style.background = "#2a2a2a");
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (videoEl) {
-          videoEl.currentTime = Math.max(0, videoEl.currentTime + val);
-          showSeek(val);
-        }
-      });
-      container.appendChild(btn);
+  function createSeekButton(val, compact = false) {
+    const btn = document.createElement("button");
+    btn.textContent = formatSeekLabel(val);
+    btn.style.cssText = compact ? CONFIG.STYLE.SEEK_BTN_VERT : CONFIG.STYLE.SEEK_BTN;
+    if (compact) btn.style.fontSize = cfg.ui.btnSize + "px";
+    btn.onmouseenter = () => (btn.style.background = CONFIG.STYLE.SEEK_BTN_HOVER);
+    btn.onmouseleave = () => (btn.style.background = "#2a2a2a");
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!videoEl) return;
+      videoEl.currentTime = Math.max(0, videoEl.currentTime + val);
+      showSeek(val);
     });
+    return btn;
   }
 
-  // 去掉最大的两档（3.0/2.5），这两个位置由 −/+ 按钮代替
-  function getPresetSpeeds() {
-    return [...cfg.speeds].sort((a, b) => b - a).slice(2);
+  function renderSeekRow(container) {
+    cfg.seeks.forEach((val) => {
+      container.appendChild(createSeekButton(val));
+    });
   }
 
   function adjustSpeed(dir) {
@@ -497,11 +687,14 @@
     videoEl.playbackRate = rate;
   }
 
-  function createSpeedAdjustBtn(dir, style) {
+  function createSpeedAdjustBtn(dir, compact = false) {
     const btn = document.createElement("button");
     btn.textContent = dir > 0 ? "+" : "−";
     btn.title = dir > 0 ? "增加倍速" : "减少倍速";
-    btn.style.cssText = style;
+    btn.style.cssText = compact
+      ? CONFIG.STYLE.SPEED_BTN_VERT
+      : CONFIG.STYLE.SPEED_BTN;
+    if (compact) btn.style.fontSize = cfg.ui.btnSize + "px";
     btn.addEventListener("click", (e) => {
       e.stopPropagation();
       adjustSpeed(dir);
@@ -517,51 +710,177 @@
       : "–";
   }
 
-  function createSpeedDisplay(style) {
+  function createSpeedDisplay(compact = false) {
     speedDisplay = document.createElement("span");
     speedDisplay.id = P + "-speedval";
     speedDisplay.setAttribute("data-speed-display", "");
-    speedDisplay.style.cssText = style;
+    speedDisplay.style.cssText = compact
+      ? CONFIG.STYLE.SPEED_DISPLAY_VERT
+      : CONFIG.STYLE.SPEED_DISPLAY;
+    if (compact) speedDisplay.style.fontSize = cfg.ui.btnSize + "px";
     speedDisplay.textContent = "–";
     updateSpeedDisplay();
     return speedDisplay;
   }
 
-  function renderSpeedRow(container) {
-    container.innerHTML = "";
-    container.appendChild(createSpeedAdjustBtn(-1, CONFIG.STYLE.SPEED_BTN));
-    container.appendChild(
-      createSpeedDisplay(
-        CONFIG.STYLE.SPEED_BTN +
-          ";background:#111;color:#7ed6df;text-align:center;cursor:default",
-      ),
-    );
-    container.appendChild(createSpeedAdjustBtn(1, CONFIG.STYLE.SPEED_BTN));
-    getPresetSpeeds().forEach((sp) => {
-      const btn = document.createElement("button");
-      btn.textContent = sp + "x";
-      btn.dataset.speed = sp;
-      btn.style.cssText = CONFIG.STYLE.SPEED_BTN;
-      if (videoEl && Math.abs(videoEl.playbackRate - sp) < 0.01) {
-        btn.style.background = CONFIG.STYLE.SPEED_BTN_ACTIVE;
-        curSpeedBtn = btn;
-      }
-      btn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (videoEl) {
-          videoEl.playbackRate = sp;
-          if (curSpeedBtn) curSpeedBtn.style.background = "#2a2a2a";
-          btn.style.background = CONFIG.STYLE.SPEED_BTN_ACTIVE;
-          curSpeedBtn = btn;
-        }
-      });
-      container.appendChild(btn);
+  function createSpeedButton(sp, compact = false) {
+    const btn = document.createElement("button");
+    btn.textContent = formatSpeedLabel(sp);
+    btn.dataset.speed = sp;
+    btn.style.cssText = compact
+      ? CONFIG.STYLE.SPEED_BTN_VERT
+      : CONFIG.STYLE.SPEED_BTN;
+    if (compact) btn.style.fontSize = cfg.ui.btnSize + "px";
+    if (videoEl && Math.abs(videoEl.playbackRate - sp) < 0.01) {
+      btn.style.background = CONFIG.STYLE.SPEED_BTN_ACTIVE;
+    }
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (!videoEl) return;
+      videoEl.playbackRate = sp;
+      updateSpeedHighlight();
     });
+    return btn;
+  }
+
+  function renderSpeedRow(container) {
+    container.append(
+      createSpeedAdjustBtn(-1),
+      createSpeedDisplay(),
+      createSpeedAdjustBtn(1),
+    );
+    cfg.speeds.forEach((sp) => container.appendChild(createSpeedButton(sp)));
+  }
+
+  // ============ 列表编辑器（快进/倍速按钮的增删改与排序） ============
+  function createListEditor({
+    title,
+    hint,
+    values,
+    min,
+    max,
+    step,
+    format,
+    defaultAdd,
+    addText,
+    maxItems,
+  }) {
+    const section = document.createElement("div");
+    section.style.cssText = CONFIG.STYLE.SECTION;
+    const sectionTitle = document.createElement("h4");
+    sectionTitle.textContent = title;
+    sectionTitle.style.cssText = CONFIG.STYLE.SECTION_TITLE;
+    const hintEl = document.createElement("p");
+    hintEl.textContent = hint;
+    hintEl.style.cssText = "margin:-4px 0 10px;color:#888;font-size:12px;line-height:1.5";
+
+    const list = document.createElement("div");
+    list.style.cssText = "display:flex;flex-direction:column;gap:6px";
+
+    const createRow = (value) => {
+      const row = document.createElement("div");
+      row.style.cssText = CONFIG.STYLE.ITEM_ROW;
+
+      const input = document.createElement("input");
+      input.type = "number";
+      input.min = min;
+      input.max = max;
+      input.step = step;
+      input.value = value;
+      input.style.cssText = CONFIG.STYLE.ITEM_INPUT;
+
+      const preview = document.createElement("span");
+      preview.style.cssText = CONFIG.STYLE.ITEM_PREVIEW;
+      preview.textContent = format(parseFloat(input.value));
+      input.addEventListener("input", () => {
+        preview.textContent = format(parseFloat(input.value));
+      });
+
+      const up = document.createElement("button");
+      up.textContent = "↑";
+      up.title = "上移";
+      up.style.cssText = CONFIG.STYLE.ITEM_MOVE;
+      up.addEventListener("click", () => {
+        const prev = row.previousElementSibling;
+        if (prev) list.insertBefore(row, prev);
+      });
+
+      const down = document.createElement("button");
+      down.textContent = "↓";
+      down.title = "下移";
+      down.style.cssText = CONFIG.STYLE.ITEM_MOVE;
+      down.addEventListener("click", () => {
+        const next = row.nextElementSibling;
+        if (next) list.insertBefore(row, next.nextElementSibling);
+      });
+
+      const del = document.createElement("button");
+      del.textContent = "✕";
+      del.title = "删除";
+      del.style.cssText = CONFIG.STYLE.ITEM_DEL;
+      del.addEventListener("click", () => row.remove());
+
+      row.append(input, preview, up, down, del);
+      return row;
+    };
+
+    values.forEach((v) => list.appendChild(createRow(v)));
+
+    const addBtn = document.createElement("button");
+    addBtn.textContent = addText;
+    addBtn.style.cssText = CONFIG.STYLE.ADD_BTN;
+    addBtn.addEventListener("click", () => {
+      if (list.children.length >= maxItems) {
+        showToast(`最多 ${maxItems} 项`, "error");
+        return;
+      }
+      const current = Array.from(list.children).map((row) =>
+        parseFloat(row.querySelector("input").value),
+      );
+      list.appendChild(createRow(defaultAdd(current)));
+    });
+
+    section.append(sectionTitle, hintEl, list, addBtn);
+
+    return {
+      section,
+      getValues: () =>
+        Array.from(list.children).map((row) =>
+          parseFloat(row.querySelector("input").value),
+        ),
+    };
+  }
+
+  // 校验编辑器返回的数值：非空、范围、去重、至少一项
+  function collectEditorValues(editor, { min, max, decimals, allowZero, label }) {
+    const values = [];
+    for (const raw of editor.getValues()) {
+      if (!isFinite(raw)) return { error: `${label}存在空值或非数字` };
+      if (!allowZero && raw === 0) return { error: `${label}不能为 0` };
+      if (raw < min || raw > max)
+        return { error: `${label}取值需在 ${min} ~ ${max} 之间` };
+      const factor = Math.pow(10, decimals);
+      const value = Math.round(raw * factor) / factor;
+      if (values.some((v) => Math.abs(v - value) < 1e-9))
+        return { error: `${label}存在重复值：${value}` };
+      values.push(value);
+    }
+    if (!values.length) return { error: `${label}至少保留一项` };
+    return { values };
   }
 
   // ============ 增强版设置面板 ============
   function showSettings() {
     if (settingsOverlay) return; // 防止重复打开
+
+    // 打开面板时的配置快照，取消时用于还原（避免“取消”后界面已被改动）
+    const snapshot = {
+      ui: { ...cfg.ui },
+      speedStep: cfg.speedStep,
+      positionMode: cfg.positionMode,
+      proportionalPos: { ...cfg.proportionalPos },
+      lastPos: { ...lastPos },
+    };
 
     settingsOverlay = document.createElement("div");
     settingsOverlay.id = P + "-overlay";
@@ -608,7 +927,8 @@
     opacityInput.addEventListener("input", () => {
       const val = parseFloat(opacityInput.value);
       opacityVal.textContent = Math.round(val * 100) + "%";
-      if (controls) controls.style.background = `rgba(0,0,0,${val})`;
+      cfg.ui.opacity = val;
+      applyUiConfig();
     });
     opacityRow.append(opacityLabel, opacityInput, opacityVal);
 
@@ -630,7 +950,8 @@
         val >= CONFIG.VALIDATORS.fontSize.min &&
         val <= CONFIG.VALIDATORS.fontSize.max
       ) {
-        if (controls) controls.style.fontSize = val + "px";
+        cfg.ui.fontSize = val;
+        applyUiConfig();
       }
     });
     fontRow.append(fontLabel, fontInput);
@@ -654,13 +975,8 @@
     btnSizeInput.addEventListener("input", () => {
       const val = parseInt(btnSizeInput.value);
       btnSizeVal.textContent = val + "px";
-      if (controls && isVertical) {
-        controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
-          b.style.fontSize = val + "px";
-        });
-        const panelWidth = Math.max(85, val * 6 + 20);
-        controls.style.width = panelWidth + "px";
-      }
+      cfg.ui.btnSize = val;
+      applyUiConfig();
     });
     btnSizeRow.append(btnSizeLabel, btnSizeInput, btnSizeVal);
 
@@ -691,6 +1007,94 @@
     stepRow.append(stepLabel, stepInput, stepHint);
 
     speedSection.append(speedTitle, stepRow);
+
+    // 倍速按钮列表编辑
+    const speedEditor = createListEditor({
+      title: "🎚 倍速按钮",
+      hint: "按列表顺序显示在面板上；取值范围 0.1x ~ 16x",
+      values: [...cfg.speeds],
+      min: CONFIG.SPEED_MIN,
+      max: CONFIG.SPEED_MAX,
+      step: 0.05,
+      format: formatSpeedLabel,
+      addText: "＋ 添加倍速按钮",
+      maxItems: CONFIG.MAX_LIST_ITEMS,
+      defaultAdd: (current) => {
+        const candidates = [1.75, 2.25, 2.75, 3.5, 0.75, 4.0];
+        return (
+          candidates.find((v) => !current.some((x) => Math.abs(x - v) < 1e-9)) ||
+          1.5
+        );
+      },
+    });
+
+    // 快进按钮列表编辑
+    const seekEditor = createListEditor({
+      title: "⏩ 快进按钮",
+      hint: "数值单位为秒，负数表示快退；按列表顺序显示在面板上",
+      values: [...cfg.seeks],
+      min: CONFIG.SEEK_MIN,
+      max: CONFIG.SEEK_MAX,
+      step: 1,
+      format: formatSeekLabel,
+      addText: "＋ 添加快进按钮",
+      maxItems: CONFIG.MAX_LIST_ITEMS,
+      defaultAdd: (current) => {
+        const candidates = [30, 15, 5, 60, 120, -30, -60];
+        return (
+          candidates.find((v) => !current.some((x) => Math.abs(x - v) < 1e-9)) ||
+          10
+        );
+      },
+    });
+
+    speedEditor.section.id = P + "-speed-editor";
+    seekEditor.section.id = P + "-seek-editor";
+
+    // 垂直面板内快进/快退按钮的上下方向（放在快进按钮列表下方）
+    const seekOrderWrap = document.createElement("div");
+    seekOrderWrap.id = P + "-seek-order-v";
+    seekOrderWrap.style.cssText =
+      "margin-top:12px;padding-top:10px;border-top:1px solid #333";
+    const seekOrderCaption = document.createElement("div");
+    seekOrderCaption.textContent = "垂直面板：快进/快退按钮从上到下的顺序";
+    seekOrderCaption.style.cssText =
+      "margin:0 0 6px;font-size:13px;color:#7ed6df";
+    const seekOrderRow = document.createElement("div");
+    seekOrderRow.style.cssText =
+      "display:flex;gap:16px;flex-wrap:wrap;margin:6px 0";
+    const makeSeekOrderLabel = (value, text, desc) => {
+      const label = document.createElement("label");
+      label.style.cssText =
+        "display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px";
+      label.title = desc;
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = P + "-seekOrderV";
+      radio.value = value;
+      radio.checked = cfg.seekOrderV === value;
+      label.append(radio, text);
+      return label;
+    };
+    seekOrderRow.append(
+      makeSeekOrderLabel(
+        "backward",
+        "快退在前（- → +）",
+        "先显示快退按钮，再显示快进按钮",
+      ),
+      makeSeekOrderLabel(
+        "forward",
+        "快进在前（+ → -）",
+        "先显示快进按钮，再显示快退按钮",
+      ),
+    );
+    const seekOrderHint = document.createElement("p");
+    seekOrderHint.textContent =
+      "仅影响垂直面板；同一方向内仍按列表中的先后顺序排列";
+    seekOrderHint.style.cssText =
+      "margin:4px 0 0;color:#888;font-size:12px;line-height:1.5";
+    seekOrderWrap.append(seekOrderCaption, seekOrderRow, seekOrderHint);
+    seekEditor.section.appendChild(seekOrderWrap);
 
     // ============ 定位方式区域 ============
     const posModeSection = document.createElement("div");
@@ -796,32 +1200,21 @@
     const btnRow = document.createElement("div");
     btnRow.style.cssText = CONFIG.STYLE.BTN_ROW;
 
-    const resetBtn = document.createElement("button");
-    resetBtn.textContent = CONFIG.TEXT.RESET;
-    resetBtn.style.cssText = CONFIG.STYLE.RESET_BTN;
-    resetBtn.addEventListener("click", () => {
-      if (confirm("确定要恢复界面设置为默认值吗？\n（倍速和快进设置不会改变）")) {
-        cfg.ui = { ...CONFIG.DEFAULT_UI };
-        // 实时更新面板
-        if (controls) {
-          controls.style.background = `rgba(0,0,0,${cfg.ui.opacity})`;
-          controls.style.fontSize = cfg.ui.fontSize + "px";
-        }
-        saveConfig();
-        showToast(CONFIG.TEXT.TOAST.RESET);
-        opacityInput.value = cfg.ui.opacity;
-        opacityVal.textContent = Math.round(cfg.ui.opacity * 100) + "%";
-        fontInput.value = cfg.ui.fontSize;
-        btnSizeInput.value = cfg.ui.btnSize;
-        btnSizeVal.textContent = cfg.ui.btnSize + "px";
-        if (controls && isVertical) {
-          controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
-            b.style.fontSize = cfg.ui.btnSize + "px";
-          });
-          const panelWidth = Math.max(85, cfg.ui.btnSize * 6 + 20);
-          controls.style.width = panelWidth + "px";
-        }
-      }
+    const clearBtn = document.createElement("button");
+    clearBtn.textContent = CONFIG.TEXT.CLEAR;
+    clearBtn.title = "清空所有本地配置，恢复为脚本内 CONFIG 默认值";
+    clearBtn.style.cssText = CONFIG.STYLE.CLEAR_BTN;
+    clearBtn.addEventListener("click", () => {
+      if (
+        !confirm(
+          "确定要清空所有本地配置吗？\n快进/倍速列表、界面样式、位置和布局都会恢复为脚本内默认值。",
+        )
+      )
+        return;
+      clearAllConfig();
+      closeSettings(true);
+      rebuildPanel();
+      showToast(CONFIG.TEXT.TOAST.CLEARED);
     });
 
     const btnGroup = document.createElement("div");
@@ -839,14 +1232,46 @@
     saveBtn.onmouseleave = () => (saveBtn.style.background = "#27ae60");
 
     btnGroup.append(cancelBtn, saveBtn);
-    btnRow.append(resetBtn, btnGroup);
+
+    // 初始化：关闭面板，重新扫描视频并重建控制器
+    const initBtn = document.createElement("button");
+    initBtn.textContent = CONFIG.TEXT.INIT;
+    initBtn.title = "重新扫描视频并重建控制面板";
+    initBtn.style.cssText = CONFIG.STYLE.INIT_BTN;
+    initBtn.addEventListener("click", () => {
+      closeSettings(false);
+      reinitialize();
+    });
+
+    const leftGroup = document.createElement("div");
+    leftGroup.style.cssText = "display:flex;gap:8px";
+    leftGroup.append(clearBtn, initBtn);
+    btnRow.append(leftGroup, btnGroup);
 
     // 组装对话框
-    dlg.append(header, uiSection, speedSection, posModeSection, btnRow);
+    dlg.append(
+      header,
+      uiSection,
+      speedSection,
+      speedEditor.section,
+      seekEditor.section,
+      posModeSection,
+      btnRow,
+    );
     settingsOverlay.appendChild(dlg);
 
     // 关闭逻辑
-    const closeSettings = () => {
+    const closeSettings = (commit = false) => {
+      if (!commit) {
+        // 未保存就关闭：还原打开面板前的配置与界面效果
+        cfg.ui = { ...snapshot.ui };
+        cfg.speedStep = snapshot.speedStep;
+        cfg.positionMode = snapshot.positionMode;
+        cfg.proportionalPos = { ...snapshot.proportionalPos };
+        lastPos = { ...snapshot.lastPos };
+        applyUiConfig();
+        applyPosition();
+      }
       if (settingsKeyHandler) {
         document.removeEventListener("keydown", settingsKeyHandler);
         settingsKeyHandler = null;
@@ -857,18 +1282,71 @@
       }
     };
 
-    closeBtn.onclick = closeSettings;
-    cancelBtn.onclick = closeSettings;
+    closeBtn.onclick = () => closeSettings(false);
+    cancelBtn.onclick = () => closeSettings(false);
     settingsOverlay.addEventListener("click", (e) => {
-      if (e.target === settingsOverlay) closeSettings();
+      if (e.target === settingsOverlay) closeSettings(false);
     });
 
     // 保存逻辑
     saveBtn.onclick = () => {
-      // 更新UI配置
-      cfg.ui.opacity = parseFloat(opacityInput.value);
-      cfg.ui.fontSize = parseInt(fontInput.value);
-      cfg.ui.btnSize = parseInt(btnSizeInput.value);
+      // 先校验快进/倍速列表，有误则不落盘、不关闭面板
+      const seeksResult = collectEditorValues(seekEditor, {
+        min: CONFIG.SEEK_MIN,
+        max: CONFIG.SEEK_MAX,
+        decimals: 0,
+        allowZero: false,
+        label: "快进按钮",
+      });
+      if (seeksResult.error) {
+        showToast(seeksResult.error, "error");
+        return;
+      }
+      const speedsResult = collectEditorValues(speedEditor, {
+        min: CONFIG.SPEED_MIN,
+        max: CONFIG.SPEED_MAX,
+        decimals: 2,
+        allowZero: false,
+        label: "倍速按钮",
+      });
+      if (speedsResult.error) {
+        showToast(speedsResult.error, "error");
+        return;
+      }
+      const listChanged =
+        seeksResult.values.join(",") !== cfg.seeks.join(",") ||
+        speedsResult.values.join(",") !== cfg.speeds.join(",");
+      const checkedSeekOrder = document.querySelector(
+        `input[name="${P}-seekOrderV"]:checked`,
+      );
+      const nextSeekOrderV =
+        checkedSeekOrder && checkedSeekOrder.value === "forward"
+          ? "forward"
+          : "backward";
+      const seekOrderChanged = nextSeekOrderV !== cfg.seekOrderV;
+
+      // 更新UI配置（越界或空值回退到默认值，避免写入 NaN）
+      const clamp = (v, rule, fallback) =>
+        isFinite(v) ? Math.max(rule.min, Math.min(rule.max, v)) : fallback;
+      cfg.ui.opacity = clamp(
+        parseFloat(opacityInput.value),
+        CONFIG.VALIDATORS.opacity,
+        CONFIG.DEFAULT_UI.opacity,
+      );
+      cfg.ui.fontSize = Math.round(
+        clamp(
+          parseFloat(fontInput.value),
+          CONFIG.VALIDATORS.fontSize,
+          CONFIG.DEFAULT_UI.fontSize,
+        ),
+      );
+      cfg.ui.btnSize = Math.round(
+        clamp(
+          parseFloat(btnSizeInput.value),
+          CONFIG.VALIDATORS.btnSize,
+          CONFIG.DEFAULT_UI.btnSize,
+        ),
+      );
 
       // 更新倍速步进
       let stepVal = parseFloat(stepInput.value);
@@ -881,7 +1359,10 @@
       cfg.speedStep = stepVal;
 
       // 更新定位方式
-      const newMode = document.querySelector(`input[name="${P}-posMode"]:checked`).value;
+      const checkedMode = document.querySelector(
+        `input[name="${P}-posMode"]:checked`,
+      );
+      const newMode = checkedMode ? checkedMode.value : cfg.positionMode;
       if (newMode !== cfg.positionMode) {
         cfg.positionMode = newMode;
         if (newMode === "proportional") {
@@ -899,25 +1380,19 @@
       }
 
       // 保存并应用
+      cfg.seeks = seeksResult.values;
+      cfg.speeds = speedsResult.values;
+      cfg.seekOrderV = nextSeekOrderV;
       saveConfig();
       GM_setValue(P + "_pos", JSON.stringify(lastPos));
       applyPosition();
 
       // 实时应用更改
-      if (controls) {
-        controls.style.background = `rgba(0,0,0,${cfg.ui.opacity})`;
-        controls.style.fontSize = cfg.ui.fontSize + "px";
-      }
-      if (controls && isVertical) {
-        controls.querySelectorAll("button, [data-speed-display]").forEach(b => {
-          b.style.fontSize = cfg.ui.btnSize + "px";
-        });
-        const panelWidth = Math.max(85, cfg.ui.btnSize * 6 + 20);
-        controls.style.width = panelWidth + "px";
-      }
+      applyUiConfig();
 
       showToast(CONFIG.TEXT.TOAST.SAVED);
-      closeSettings();
+      closeSettings(true);
+      if (listChanged || seekOrderChanged) rebuildPanel();
     };
 
     // 键盘支持
@@ -934,7 +1409,9 @@
     settingsKeyHandler = onKey;
     document.addEventListener("keydown", onKey);
 
-    document.body.appendChild(settingsOverlay);
+    const overlayHost =
+      (isFullscreen && fullscreenContainer) || document.body || document.documentElement;
+    overlayHost.appendChild(settingsOverlay);
 
     // 聚焦第一个输入框
     setTimeout(() => {
@@ -948,14 +1425,22 @@
 
   function toggleVisibility() {
     visible = !visible;
-    controls.style.display = visible ? "flex" : "none";
-    floatBtn.style.display = visible ? "none" : "block";
-    if (!visible) floatBtn.textContent = CONFIG.TEXT.SHOW_PANEL;
+    if (controls) controls.style.display = visible ? "flex" : "none";
+    if (floatBtn) {
+      floatBtn.style.display = visible ? "none" : "block";
+      if (!visible) floatBtn.textContent = CONFIG.TEXT.SHOW_PANEL;
+    }
     GM_setValue(P + "_visible", visible);
   }
 
   function setupDrag(el) {
-    let dragging = false, ox, oy;
+    if (dragDetach) {
+      dragDetach();
+      dragDetach = null;
+    }
+    let dragging = false,
+      ox = 0,
+      oy = 0;
     const start = (cx, cy) => {
       const rect = el.getBoundingClientRect();
       ox = cx - rect.left;
@@ -967,7 +1452,8 @@
     const move = (cx, cy) => {
       if (!dragging) return;
       const rect = el.getBoundingClientRect();
-      let nx = cx - ox, ny = cy - oy;
+      let nx = cx - ox,
+        ny = cy - oy;
       nx = Math.max(5, Math.min(nx, innerWidth - rect.width - 5));
       ny = Math.max(5, Math.min(ny, innerHeight - rect.height - 5));
       el.style.left = nx + "px";
@@ -992,13 +1478,68 @@
         GM_setValue(P + "_pos", JSON.stringify(lastPos));
       }
     };
-    el.addEventListener("mousedown", (e) => { if (!isInteractive(e.target)) start(e.clientX, e.clientY); });
-    document.addEventListener("mousemove", (e) => move(e.clientX, e.clientY));
-    document.addEventListener("mouseup", end);
-    el.addEventListener("touchstart", (e) => { if (!isInteractive(e.target) && e.touches.length === 1) { e.preventDefault(); start(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
-    document.addEventListener("touchmove", (e) => { if (dragging && e.touches.length === 1) { e.preventDefault(); move(e.touches[0].clientX, e.touches[0].clientY); } }, { passive: false });
-    document.addEventListener("touchend", end);
-    el.addEventListener("selectstart", (e) => e.preventDefault());
+    const onMouseDown = (e) => {
+      if (!isInteractive(e.target)) start(e.clientX, e.clientY);
+    };
+    const onMouseMove = (e) => move(e.clientX, e.clientY);
+    const onMouseUp = () => end();
+    const onTouchStart = (e) => {
+      if (!isInteractive(e.target) && e.touches.length === 1) {
+        e.preventDefault();
+        start(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    const onTouchMove = (e) => {
+      if (dragging && e.touches.length === 1) {
+        e.preventDefault();
+        move(e.touches[0].clientX, e.touches[0].clientY);
+      }
+    };
+    const onTouchEnd = () => end();
+    const onSelectStart = (e) => e.preventDefault();
+
+    el.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("mousemove", onMouseMove);
+    document.addEventListener("mouseup", onMouseUp);
+    el.addEventListener("touchstart", onTouchStart, { passive: false });
+    document.addEventListener("touchmove", onTouchMove, { passive: false });
+    document.addEventListener("touchend", onTouchEnd);
+    el.addEventListener("selectstart", onSelectStart);
+
+    dragDetach = () => {
+      el.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("mousemove", onMouseMove);
+      document.removeEventListener("mouseup", onMouseUp);
+      el.removeEventListener("touchstart", onTouchStart);
+      document.removeEventListener("touchmove", onTouchMove);
+      document.removeEventListener("touchend", onTouchEnd);
+      el.removeEventListener("selectstart", onSelectStart);
+    };
+  }
+
+  // 重新扫描视频并重建控制器（刷新按钮与设置面板“初始化”按钮共用）
+  function reinitialize() {
+    L("Reinitialize: start scan");
+    // 先确认能找到视频，避免初始化失败时把现有面板也清掉
+    if (!findVideo()) {
+      L("Reinitialize: no video found");
+      showToast(CONFIG.TEXT.TOAST.INIT_FAIL, "error");
+      return;
+    }
+    manualRefresh = true;
+    try {
+      cleanup();
+      init();
+    } finally {
+      manualRefresh = false;
+    }
+    if (videoEl && controls) {
+      L(`Reinitialize: ok -> ${(videoEl.src || "<inline>").slice(0, 60)}`);
+      showToast(CONFIG.TEXT.TOAST.INIT_OK);
+    } else {
+      L("Reinitialize: no video found");
+      showToast(CONFIG.TEXT.TOAST.INIT_FAIL, "error");
+    }
   }
 
   function rebuildPanel() {
@@ -1006,6 +1547,7 @@
     if (isFullscreen) {
       isFullscreen = false;
       originalParent = null;
+      fullscreenContainer = null;
     }
     if (controls && controls.parentNode) controls.parentNode.removeChild(controls);
     if (floatBtn && floatBtn.parentNode) floatBtn.parentNode.removeChild(floatBtn);
@@ -1017,8 +1559,6 @@
     curTime = null;
     totalTime = null;
     playBtn = null;
-    actionDiv = null;
-    curSpeedBtn = null;
     speedDisplay = null;
     createControls();
     setupListeners();
@@ -1027,270 +1567,188 @@
     }
   }
 
-  function createControls() {
-    if (isVertical) {
-      controls = document.createElement("div");
-      controls.id = P + "-cont";
-      const panelWidth = Math.max(85, cfg.ui.btnSize * 6 + 20);
-      controls.style.cssText = CONFIG.STYLE.PANEL_VERT.replace(
-        "rgba(0,0,0,.85)",
-        `rgba(0,0,0,${cfg.ui.opacity})`,
-      ).replace("font-size:14px", `font-size:${cfg.ui.fontSize}px`).replace("width:85px", `width:${panelWidth}px`);
-      try {
-        const s = GM_getValue(P + "_pos");
-        if (s) lastPos = JSON.parse(s);
-      } catch (e) {}
+  // ==================== 面板构建 ====================
+  function createDragHandle() {
+    const handle = document.createElement("div");
+    handle.style.cssText =
+      "width:40px;height:4px;background:#666;border-radius:2px;cursor:grab;margin:0 auto 6px";
+    return handle;
+  }
 
-      const dragHandle = document.createElement("div");
-      dragHandle.style.cssText = "width:40px;height:4px;background:#666;border-radius:2px;cursor:grab;margin:0 auto 6px";
-      controls.appendChild(dragHandle);
+  function createIconButton(text, title, onClick, style = CONFIG.STYLE.SETTING_BTN) {
+    const btn = document.createElement("button");
+    btn.textContent = text;
+    btn.title = title;
+    btn.style.cssText = style;
+    btn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      onClick();
+    });
+    return btn;
+  }
 
-      const headerRow = document.createElement("div");
-      headerRow.style.cssText = "display:flex;justify-content:center;align-items:center;gap:8px";
+  function toggleRow(id) {
+    const row = document.getElementById(id);
+    if (row) row.style.display = row.style.display === "none" ? "flex" : "none";
+  }
 
-      const setBtn = document.createElement("button");
-      setBtn.innerHTML = "⚙";
-      setBtn.title = "参数设置 (点击打开)";
-      setBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-      setBtn.addEventListener("click", (e) => { e.stopPropagation(); showSettings(); });
-
-      const layoutBtn = document.createElement("button");
-      layoutBtn.textContent = "↔";
-      layoutBtn.title = "切换为水平面板";
-      layoutBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-      layoutBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        isVertical = false;
-        GM_setValue(P + "_layout", "h");
-        rebuildPanel();
-      });
-
-      const hideBtn = document.createElement("button");
-      hideBtn.innerHTML = "✕";
-      hideBtn.title = "隐藏面板";
-      hideBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-      hideBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleVisibility();
-      });
-
-      headerRow.append(setBtn, layoutBtn, hideBtn);
-      controls.appendChild(headerRow);
-
-      const contentWrap = document.createElement("div");
-      contentWrap.style.cssText = `display:flex;flex-direction:column;gap:6px;width:100%;align-items:center`;
-
-      const progRow = document.createElement("div");
-      progRow.style.cssText = "width:100%;padding:2px 0";
-      progress = document.createElement("input");
-      progress.type = "range";
-      progress.min = "0";
-      progress.max = "10000";
-      progress.value = "0";
-      progress.style.cssText = "width:100%;height:3px;cursor:pointer;accent-color:#4CAF50;margin:0";
-      progress.addEventListener("input", () => {
-        if (videoEl && isFinite(videoEl.duration))
-          videoEl.currentTime = (progress.value / 10000) * videoEl.duration;
-      });
-      progRow.appendChild(progress);
-      contentWrap.appendChild(progRow);
-
-      curTime = document.createElement("span");
-      curTime.style.cssText = "text-align:center;font-size:11px;color:#ccc";
-      curTime.textContent = "00:00";
-      totalTime = document.createElement("span");
-      totalTime.style.cssText = "text-align:center;font-size:11px;color:#888";
-      totalTime.textContent = " / 00:00";
-      const timeRow = document.createElement("div");
-      timeRow.style.cssText = "text-align:center;width:100%";
-      timeRow.append(curTime, totalTime);
-      contentWrap.appendChild(timeRow);
-
-      const btnGrid = document.createElement("div");
-      btnGrid.style.cssText = "display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%";
-
-      const speedCol = document.createElement("div");
-      speedCol.style.cssText = "display:flex;flex-direction:column;gap:3px";
-      const vsBtnStyle =
-        "padding:4px 0;border:1px solid #555;border-radius:4px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:" +
-        cfg.ui.btnSize +
-        "px;text-align:center;flex-shrink:0";
-      [...getPresetSpeeds()].reverse().forEach((sp) => {
-        const btn = document.createElement("button");
-        btn.textContent = sp + "x";
-        btn.dataset.speed = sp;
-        btn.style.cssText = vsBtnStyle;
-        if (videoEl && Math.abs(videoEl.playbackRate - sp) < 0.01) {
-          btn.style.background = "#2196F3";
-          curSpeedBtn = btn;
-        }
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (videoEl) {
-            videoEl.playbackRate = sp;
-            if (curSpeedBtn) curSpeedBtn.style.background = "#2a2a2a";
-            btn.style.background = "#2196F3";
-            curSpeedBtn = btn;
-          }
-        });
-        speedCol.appendChild(btn);
-      });
-      const vsDisplayStyle =
-        "padding:4px 0;border:1px solid #555;border-radius:4px;background:#111;color:#7ed6df;cursor:default;font-size:" +
-        cfg.ui.btnSize +
-        "px;text-align:center";
-      speedCol.appendChild(createSpeedAdjustBtn(-1, vsBtnStyle));
-      speedCol.appendChild(createSpeedDisplay(vsDisplayStyle));
-      speedCol.appendChild(createSpeedAdjustBtn(1, vsBtnStyle));
-      btnGrid.appendChild(speedCol);
-
-      const seekCol = document.createElement("div");
-      seekCol.style.cssText = "display:flex;flex-direction:column;gap:3px";
-      [...cfg.seeks].reverse().forEach((val) => {
-        const btn = document.createElement("button");
-        btn.textContent = CONFIG.TEXT.SEEK_LABELS[val] || (val >= 0 ? "+" + val + "s" : val + "s");
-        btn.style.cssText = "padding:4px 0;border:1px solid #555;border-radius:5px;background:#2a2a2a;color:#fff;cursor:pointer;font-size:" + cfg.ui.btnSize + "px;text-align:center;flex-shrink:0";
-        btn.onmouseenter = () => (btn.style.background = "#444");
-        btn.onmouseleave = () => (btn.style.background = "#2a2a2a");
-        btn.addEventListener("click", (e) => {
-          e.stopPropagation();
-          if (videoEl) {
-            videoEl.currentTime = Math.max(0, videoEl.currentTime + val);
-            showSeek(val);
-          }
-        });
-        seekCol.appendChild(btn);
-      });
-      btnGrid.appendChild(seekCol);
-      contentWrap.appendChild(btnGrid);
-
-      playBtn = document.createElement("button");
-      playBtn.textContent = videoEl && !videoEl.paused ? "⏸" : "▶";
-      playBtn.style.cssText = "padding:8px 0;border:none;border-radius:5px;color:#fff;cursor:pointer;font-weight:500;width:100%;font-size:16px;background:" + (videoEl && !videoEl.paused ? "#dc3545" : "#28a745");
-      playBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        if (videoEl) videoEl.paused ? videoEl.play() : videoEl.pause();
-      });
-      contentWrap.appendChild(playBtn);
-
-      controls.appendChild(contentWrap);
-
-      document.body.appendChild(controls);
-
-      floatBtn = document.createElement("button");
-      floatBtn.id = P + "-hide";
-      floatBtn.textContent = CONFIG.TEXT.SHOW_PANEL;
-      floatBtn.style.cssText = CONFIG.STYLE.FLOAT_BTN;
-      floatBtn.addEventListener("click", (e) => {
-        e.stopPropagation();
-        toggleVisibility();
-      });
-      document.body.appendChild(floatBtn);
-
-      try {
-        if (GM_getValue(P + "_visible") === false) {
-          visible = true;
-          toggleVisibility();
-        }
-      } catch (e) {}
-
-      applyPosition();
-      setupDrag(controls);
-      return;
-    }
-
-    controls = document.createElement("div");
-    controls.id = P + "-cont";
-    // 应用保存的UI配置
-    controls.style.cssText = CONFIG.STYLE.PANEL.replace(
-      "rgba(0,0,0,.85)",
-      `rgba(0,0,0,${cfg.ui.opacity})`,
-    ).replace("font-size:14px", `font-size:${cfg.ui.fontSize}px`);
-
-    try {
-      const s = GM_getValue(P + "_pos");
-      if (s) lastPos = JSON.parse(s);
-    } catch (e) {}
-
-    const dragHandle = document.createElement("div");
-    dragHandle.style.cssText = "width:40px;height:4px;background:#666;border-radius:2px;cursor:grab;margin:0 auto 6px";
-    controls.appendChild(dragHandle);
-
-    // 首行：设置 + 亮度 + 音量 + 隐藏按钮
+  function createHeader() {
     const headerRow = document.createElement("div");
-    headerRow.style.cssText = CONFIG.STYLE.HEADER_ROW;
-    const setBtn = document.createElement("button");
-    setBtn.innerHTML = "⚙";
-    setBtn.title = "参数设置 (点击打开)";
-    setBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-    setBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      showSettings();
-    });
-    const layoutBtn = document.createElement("button");
-    layoutBtn.textContent = "↕";
-    layoutBtn.title = "切换为垂直面板";
-    layoutBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-    layoutBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      isVertical = true;
-      GM_setValue(P + "_layout", "v");
-      rebuildPanel();
-    });
-    const brightBtn = document.createElement("button");
-    brightBtn.textContent = CONFIG.TEXT.BRIGHTNESS_BTN;
-    brightBtn.title = "调整视频亮度";
-    brightBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-    brightBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const row = document.getElementById(P + "-brightness");
-      if (row)
-        row.style.display = row.style.display === "none" ? "flex" : "none";
-    });
-    const volBtn = document.createElement("button");
-    volBtn.textContent = CONFIG.TEXT.VOLUME_BTN;
-    volBtn.title = "调整视频音量";
-    volBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-    volBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      const row = document.getElementById(P + "-volume");
-      if (row)
-        row.style.display = row.style.display === "none" ? "flex" : "none";
-    });
-    const hidePanelBtn = document.createElement("button");
-    hidePanelBtn.textContent = CONFIG.TEXT.HIDE_PANEL;
-    hidePanelBtn.style.cssText = CONFIG.STYLE.HIDE_BTN;
-    hidePanelBtn.addEventListener("click", (e) => {
+    headerRow.style.cssText = isVertical
+      ? "display:flex;justify-content:center;align-items:center;gap:8px"
+      : CONFIG.STYLE.HEADER_ROW;
+    headerRow.appendChild(
+      createIconButton("⚙", "参数设置 (点击打开)", showSettings),
+    );
+    headerRow.appendChild(
+      createIconButton(
+        isVertical ? "↔" : "↕",
+        isVertical ? "切换为水平面板" : "切换为垂直面板",
+        () => {
+          isVertical = !isVertical;
+          GM_setValue(P + "_layout", isVertical ? "v" : "h");
+          rebuildPanel();
+        },
+      ),
+    );
+    if (!isVertical) {
+      headerRow.append(
+        createIconButton(CONFIG.TEXT.BRIGHTNESS_BTN, "调整视频亮度", () =>
+          toggleRow(P + "-brightness"),
+        ),
+        createIconButton(CONFIG.TEXT.VOLUME_BTN, "调整视频音量", () =>
+          toggleRow(P + "-volume"),
+        ),
+        createIconButton(CONFIG.TEXT.REFRESH_BTN, "重新检测视频", reinitialize),
+        createIconButton(
+          CONFIG.TEXT.HIDE_PANEL,
+          "隐藏面板",
+          toggleVisibility,
+          CONFIG.STYLE.HIDE_BTN,
+        ),
+      );
+    } else {
+      headerRow.appendChild(
+        createIconButton("✕", "隐藏面板", toggleVisibility),
+      );
+    }
+    return headerRow;
+  }
+
+  function createFloatButton() {
+    floatBtn = document.createElement("button");
+    floatBtn.id = P + "-hide";
+    floatBtn.textContent = CONFIG.TEXT.SHOW_PANEL;
+    floatBtn.style.cssText = CONFIG.STYLE.FLOAT_BTN;
+    floatBtn.addEventListener("click", (e) => {
       e.stopPropagation();
       toggleVisibility();
     });
-    const refreshBtn = document.createElement("button");
-    refreshBtn.innerHTML = "🔄";
-    refreshBtn.title = "重新检测视频";
-    refreshBtn.style.cssText = CONFIG.STYLE.SETTING_BTN;
-    refreshBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      L("Refresh: start scan");
-      manualRefresh = true;
-      cleanup();
-      L("Refresh: cleanup done, re-init...");
-      init();
-      if (videoEl && controls) {
-        L(`Refresh: ok -> ${(videoEl.src || "<inline>").slice(0, 60)}`);
-        showToast("✓ 已重新绑定视频");
-      } else {
-        L("Refresh: no video found");
-        showToast("未找到可控制的视频", "error");
-      }
-      manualRefresh = false;
-    });
-    headerRow.append(setBtn, layoutBtn, brightBtn, volBtn, refreshBtn, hidePanelBtn);
-    controls.appendChild(headerRow);
+    document.body.appendChild(floatBtn);
+  }
 
-    // 亮度滑块行
+  function restoreVisibility() {
+    try {
+      if (GM_getValue(P + "_visible") === false) {
+        visible = true;
+        toggleVisibility();
+      }
+    } catch (e) {}
+  }
+
+  function createProgressInput(compact = false) {
+    progress = document.createElement("input");
+    progress.type = "range";
+    progress.min = "0";
+    progress.max = "10000";
+    progress.value = "0";
+    progress.style.cssText = compact
+      ? "display:block;width:100%;min-width:0;margin:0;padding:0;box-sizing:border-box;height:6px;cursor:pointer;accent-color:#4CAF50"
+      : CONFIG.STYLE.PROGRESS;
+    progress.addEventListener("input", () => {
+      if (videoEl && isFinite(videoEl.duration))
+        videoEl.currentTime = (progress.value / 10000) * videoEl.duration;
+    });
+    return progress;
+  }
+
+  function createTimeRow(withProgress) {
+    const timeRow = document.createElement("div");
+    timeRow.style.cssText = withProgress
+      ? CONFIG.STYLE.TIME_ROW
+      : "text-align:center;width:100%";
+    curTime = document.createElement("span");
+    curTime.style.cssText = CONFIG.STYLE.CURRENT_TIME;
+    curTime.textContent = "00:00";
+    totalTime = document.createElement("span");
+    totalTime.style.cssText = CONFIG.STYLE.TOTAL_TIME;
+    totalTime.textContent = "/ 00:00";
+    if (withProgress) {
+      timeRow.append(curTime, createProgressInput(), totalTime);
+    } else {
+      timeRow.append(curTime, totalTime);
+    }
+    return timeRow;
+  }
+
+  function createSpeedColumn() {
+    const col = document.createElement("div");
+    col.style.cssText = CONFIG.STYLE.VERT_COL;
+    cfg.speeds.forEach((sp) =>
+      col.appendChild(createSpeedButton(sp, true)),
+    );
+    col.append(
+      createSpeedAdjustBtn(-1, true),
+      createSpeedDisplay(true),
+      createSpeedAdjustBtn(1, true),
+    );
+    return col;
+  }
+
+  function createSeekColumn() {
+    const col = document.createElement("div");
+    col.setAttribute("data-seek", "");
+    col.style.cssText = CONFIG.STYLE.VERT_COL;
+    // 按方向分组后再决定上下顺序，同一方向内仍保持列表中的顺序
+    const backward = cfg.seeks.filter((v) => v < 0);
+    const forward = cfg.seeks.filter((v) => v > 0);
+    const ordered =
+      cfg.seekOrderV === "forward"
+        ? forward.concat(backward)
+        : backward.concat(forward);
+    ordered.forEach((val) => col.appendChild(createSeekButton(val, true)));
+    return col;
+  }
+
+  function createPlayButton(compact) {
+    const paused = videoEl ? videoEl.paused : true;
+    playBtn = document.createElement("button");
+    playBtn.textContent = compact
+      ? paused
+        ? "▶"
+        : "⏸"
+      : paused
+        ? CONFIG.TEXT.PLAY
+        : CONFIG.TEXT.PAUSE;
+    playBtn.style.cssText = compact
+      ? CONFIG.STYLE.PLAY_BTN_VERT
+      : CONFIG.STYLE.PLAY_BTN;
+    playBtn.style.background = paused
+      ? CONFIG.STYLE.PLAY_COLOR
+      : CONFIG.STYLE.PAUSE_COLOR;
+    playBtn.addEventListener("click", (e) => {
+      e.stopPropagation();
+      if (videoEl) videoEl.paused ? videoEl.play() : videoEl.pause();
+    });
+    return playBtn;
+  }
+
+  // 水平面板的亮度/音量滑块（垂直面板空间有限，不放置）
+  function createMediaRows(container) {
     const brightnessRow = document.createElement("div");
     brightnessRow.id = P + "-brightness";
-    brightnessRow.style.cssText = CONFIG.STYLE.BRIGHTNESS_ROW + ";display:none";
+    brightnessRow.style.cssText =
+      CONFIG.STYLE.SLIDER_ROW + ";display:none";
     const brightnessInput = document.createElement("input");
     brightnessInput.type = "range";
     brightnessInput.min = CONFIG.VALIDATORS.brightness.min;
@@ -1310,7 +1768,7 @@
     brightnessInput.addEventListener("change", saveConfig);
     const brightnessReset = document.createElement("button");
     brightnessReset.textContent = "重置";
-    brightnessReset.style.cssText = CONFIG.STYLE.BRIGHTNESS_RESET;
+    brightnessReset.style.cssText = CONFIG.STYLE.SLIDER_RESET;
     brightnessReset.title = "重置亮度为100%";
     brightnessReset.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1321,16 +1779,13 @@
       saveConfig();
     });
     brightnessRow.append(brightnessInput, brightnessVal, brightnessReset);
-    controls.appendChild(brightnessRow);
-
-    // 初始亮度
+    container.appendChild(brightnessRow);
     if (videoEl && cfg.ui.brightness !== 1.0)
       videoEl.style.filter = `brightness(${cfg.ui.brightness})`;
 
-    // 音量滑块行
     const volumeRow = document.createElement("div");
     volumeRow.id = P + "-volume";
-    volumeRow.style.cssText = CONFIG.STYLE.VOLUME_ROW + ";display:none";
+    volumeRow.style.cssText = CONFIG.STYLE.SLIDER_ROW + ";display:none";
     const volumeInput = document.createElement("input");
     volumeInput.type = "range";
     volumeInput.min = CONFIG.VALIDATORS.volume.min;
@@ -1352,8 +1807,9 @@
     });
     volumeInput.addEventListener("change", saveConfig);
     const muteBtn = document.createElement("button");
+    muteBtn.id = P + "-mute";
     muteBtn.textContent = videoEl && videoEl.muted ? "恢复" : "静音";
-    muteBtn.style.cssText = CONFIG.STYLE.VOLUME_RESET;
+    muteBtn.style.cssText = CONFIG.STYLE.SLIDER_RESET;
     muteBtn.title = "切换静音/恢复";
     muteBtn.addEventListener("click", (e) => {
       e.stopPropagation();
@@ -1362,123 +1818,187 @@
       muteBtn.textContent = videoEl.muted ? "恢复" : "静音";
     });
     volumeRow.append(volumeInput, volumeVal, muteBtn);
-    controls.appendChild(volumeRow);
-
-    // 初始音量
+    container.appendChild(volumeRow);
     if (videoEl && cfg.ui.volume !== 1.0) videoEl.volume = cfg.ui.volume;
+  }
 
-    // 时间行
-    const timeRow = document.createElement("div");
-    timeRow.style.cssText = CONFIG.STYLE.TIME_ROW;
-    curTime = document.createElement("span");
-    curTime.style.cssText = CONFIG.STYLE.CURRENT_TIME;
-    curTime.textContent = "00:00";
-    totalTime = document.createElement("span");
-    totalTime.style.cssText = CONFIG.STYLE.TOTAL_TIME;
-    totalTime.textContent = "/ 00:00";
-    progress = document.createElement("input");
-    progress.type = "range";
-    progress.min = "0";
-    progress.max = "10000";
-    progress.value = "0";
-    progress.style.cssText = CONFIG.STYLE.PROGRESS;
-    progress.addEventListener("input", () => {
-      if (videoEl && isFinite(videoEl.duration))
-        videoEl.currentTime = (progress.value / 10000) * videoEl.duration;
-    });
-    timeRow.append(curTime, progress, totalTime);
+  function buildHorizontalContent(content) {
+    const make = {
+      time: () => createTimeRow(true),
+      seek: () => {
+        const row = document.createElement("div");
+        row.setAttribute("data-seek", "");
+        row.style.cssText = CONFIG.STYLE.SEEK_ROW;
+        renderSeekRow(row);
+        return row;
+      },
+      speed: () => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;align-items:center;gap:6px;flex-wrap:wrap";
+        renderSpeedRow(row);
+        return row;
+      },
+      play: () => {
+        const row = document.createElement("div");
+        row.style.cssText = "display:flex;justify-content:flex-end";
+        row.appendChild(createPlayButton(false));
+        return row;
+      },
+    };
+    const cache = {};
+    const get = (key) => cache[key] || (cache[key] = make[key]());
+    const order = CONFIG.DEFAULT_ORDER_H;
 
-    // 快进行
-    const seekRow = document.createElement("div");
-    seekRow.setAttribute("data-seek", "");
-    seekRow.style.cssText = CONFIG.STYLE.SEEK_ROW;
-    renderSeekRow(seekRow);
-
-    // 动作行（倍速 + 播放）
-    actionDiv = document.createElement("div");
-    actionDiv.style.cssText = CONFIG.STYLE.ACTION_ROW;
-    renderSpeedRow(actionDiv);
-
-    playBtn = document.createElement("button");
-    playBtn.textContent =
-      videoEl && videoEl.paused ? CONFIG.TEXT.PLAY : CONFIG.TEXT.PAUSE;
-    playBtn.style.cssText =
-      CONFIG.STYLE.PLAY_BTN +
-      `;background:${videoEl && videoEl.paused ? CONFIG.STYLE.PLAY_COLOR : CONFIG.STYLE.PAUSE_COLOR}`;
-    playBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      if (videoEl) videoEl.paused ? videoEl.play() : videoEl.pause();
-    });
-    actionDiv.appendChild(playBtn);
-
-    controls.append(timeRow, seekRow, actionDiv);
-    document.body.appendChild(controls);
-
-    // 浮动显示/隐藏按钮
-    floatBtn = document.createElement("button");
-    floatBtn.id = P + "-hide";
-    floatBtn.textContent = CONFIG.TEXT.SHOW_PANEL;
-    floatBtn.style.cssText = CONFIG.STYLE.FLOAT_BTN;
-    floatBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      toggleVisibility();
-    });
-    document.body.appendChild(floatBtn);
-
-    // 应用之前保存的可见性状态
-    try {
-      if (GM_getValue(P + "_visible") === false) {
-        visible = true;
-        toggleVisibility();
+    for (let i = 0; i < order.length; i++) {
+      const key = order[i];
+      if (key === "speed" && order[i + 1] === "play") {
+        // 倍速与播放相邻时合并到同一行，保持原面板的紧凑布局
+        const row = document.createElement("div");
+        row.style.cssText = CONFIG.STYLE.ACTION_ROW;
+        row.append(get("speed"), get("play"));
+        content.appendChild(row);
+        i++;
+      } else if (key === "speed" || key === "play") {
+        const row = document.createElement("div");
+        row.style.cssText = CONFIG.STYLE.ACTION_ROW;
+        row.appendChild(get(key));
+        content.appendChild(row);
+      } else {
+        content.appendChild(get(key));
       }
-    } catch (e) {}
+    }
+  }
 
+  function buildVerticalContent(content) {
+    const make = {
+      progress: () => {
+        const row = document.createElement("div");
+        row.style.cssText =
+          "width:100%;padding:2px 0;box-sizing:border-box;overflow:hidden";
+        row.appendChild(createProgressInput(true));
+        return row;
+      },
+      time: () => createTimeRow(false),
+      speed: () => createSpeedColumn(),
+      seek: () => createSeekColumn(),
+      play: () => createPlayButton(true),
+    };
+    const order = CONFIG.DEFAULT_ORDER_V;
+
+    for (let i = 0; i < order.length; i++) {
+      const key = order[i];
+      const next = order[i + 1];
+      if (
+        (key === "speed" && next === "seek") ||
+        (key === "seek" && next === "speed")
+      ) {
+        // 倍速与快进相邻时并排成两列，顺序决定左右位置
+        const grid = document.createElement("div");
+        grid.style.cssText =
+          "display:grid;grid-template-columns:1fr 1fr;gap:6px;width:100%";
+        grid.append(make[key](), make[next]());
+        content.appendChild(grid);
+        i++;
+      } else {
+        content.appendChild(make[key]());
+      }
+    }
+  }
+
+  function createControls() {
+    controls = document.createElement("div");
+    controls.id = P + "-cont";
+    controls.style.cssText = isVertical
+      ? CONFIG.STYLE.PANEL_VERT
+      : CONFIG.STYLE.PANEL;
+    loadSavedPos();
+    applyUiConfig();
+
+    controls.appendChild(createDragHandle());
+    controls.appendChild(createHeader());
+    if (!isVertical) createMediaRows(controls);
+
+    const content = document.createElement("div");
+    content.style.cssText =
+      "display:flex;flex-direction:column;width:100%;" +
+      (isVertical ? "gap:6px;align-items:center" : "gap:10px");
+    if (isVertical) buildVerticalContent(content);
+    else buildHorizontalContent(content);
+    controls.appendChild(content);
+
+    document.body.appendChild(controls);
+    createFloatButton();
+    restoreVisibility();
     applyPosition();
-    // 拖拽事件
     setupDrag(controls);
   }
 
   // ==================== 视频事件绑定 ====================
   function updateSpeedHighlight() {
     updateSpeedDisplay();
-    if (!actionDiv || !videoEl) return;
+    if (!controls || !videoEl) return;
     const rate = videoEl.playbackRate;
-    actionDiv.querySelectorAll("button[data-speed]").forEach((btn) => {
+    controls.querySelectorAll("button[data-speed]").forEach((btn) => {
       const sp = parseFloat(btn.dataset.speed);
-      if (Math.abs(rate - sp) < 0.01) {
-        btn.style.background = CONFIG.STYLE.SPEED_BTN_ACTIVE;
-        curSpeedBtn = btn;
-      } else btn.style.background = "#2a2a2a";
+      btn.style.background =
+        Math.abs(rate - sp) < 0.01
+          ? CONFIG.STYLE.SPEED_BTN_ACTIVE
+          : "#2a2a2a";
     });
+  }
+
+  function syncPlayButton() {
+    if (!playBtn || !videoEl) return;
+    const paused = videoEl.paused;
+    playBtn.textContent = isVertical
+      ? paused
+        ? "▶"
+        : "⏸"
+      : paused
+        ? CONFIG.TEXT.PLAY
+        : CONFIG.TEXT.PAUSE;
+    playBtn.style.background = paused
+      ? CONFIG.STYLE.PLAY_COLOR
+      : CONFIG.STYLE.PAUSE_COLOR;
   }
 
   function setupListeners() {
     if (!videoEl) return;
-    videoEl.addEventListener("loadedmetadata", () => {
-      L("metadata loaded");
-      updateTotalTime();
-      updateProgress();
-      updateSpeedHighlight();
-    });
-    videoEl.addEventListener("durationchange", () => {
-      L("duration changed");
-      updateTotalTime();
-    });
-    videoEl.addEventListener("timeupdate", updateProgress);
-    videoEl.addEventListener("play", () => {
-      playBtn.textContent = isVertical ? "⏸" : CONFIG.TEXT.PAUSE;
-      playBtn.style.background = CONFIG.STYLE.PAUSE_COLOR;
-    });
-    videoEl.addEventListener("pause", () => {
-      playBtn.textContent = isVertical ? "▶" : CONFIG.TEXT.PLAY;
-      playBtn.style.background = CONFIG.STYLE.PLAY_COLOR;
-    });
-    videoEl.addEventListener("ratechange", updateSpeedHighlight);
-    videoEl.addEventListener("volumechange", () => {
-      const muteBtn = document.getElementById(P + "-volume");
-      if (muteBtn)
-        muteBtn.lastChild.textContent = videoEl.muted ? "恢复" : "静音";
-    });
+    // 同一视频反复绑定时先解绑旧监听，避免重复触发
+    if (listenerAC) listenerAC.abort();
+    listenerAC = new AbortController();
+    const opt = { signal: listenerAC.signal };
+    videoEl.addEventListener(
+      "loadedmetadata",
+      () => {
+        L("metadata loaded");
+        updateTotalTime();
+        updateProgress();
+        updateSpeedHighlight();
+      },
+      opt,
+    );
+    videoEl.addEventListener(
+      "durationchange",
+      () => {
+        L("duration changed");
+        updateTotalTime();
+      },
+      opt,
+    );
+    videoEl.addEventListener("timeupdate", updateProgress, opt);
+    videoEl.addEventListener("play", syncPlayButton, opt);
+    videoEl.addEventListener("pause", syncPlayButton, opt);
+    videoEl.addEventListener("ratechange", updateSpeedHighlight, opt);
+    videoEl.addEventListener(
+      "volumechange",
+      () => {
+        if (!videoEl) return;
+        const muteBtn = document.getElementById(P + "-mute");
+        if (muteBtn) muteBtn.textContent = videoEl.muted ? "恢复" : "静音";
+      },
+      opt,
+    );
   }
 
   // ==================== 清理与初始化 ====================
@@ -1488,8 +2008,36 @@
       fullscreenObserver.disconnect();
       fullscreenObserver = null;
     }
+    if (observer) {
+      observer.disconnect();
+      observer = null;
+    }
+    if (videoCheckTimer) {
+      clearTimeout(videoCheckTimer);
+      videoCheckTimer = null;
+    }
+    if (dragDetach) {
+      dragDetach();
+      dragDetach = null;
+    }
+    if (listenerAC) {
+      listenerAC.abort();
+      listenerAC = null;
+    }
+    if (seekTimer) {
+      clearTimeout(seekTimer);
+      seekTimer = null;
+    }
+    if (toastTimer) {
+      clearTimeout(toastTimer);
+      toastTimer = null;
+    }
+    const toast = document.getElementById(P + "-toast");
+    if (toast && toast.parentNode) toast.parentNode.removeChild(toast);
+    totalSeek = 0;
     isFullscreen = false;
     originalParent = null;
+    fullscreenContainer = null;
     if (settingsOverlay && settingsOverlay.parentNode)
       settingsOverlay.parentNode.removeChild(settingsOverlay);
     if (controls && controls.parentNode)
@@ -1507,22 +2055,16 @@
     totalTime = null;
     playBtn = null;
     floatBtn = null;
-    actionDiv = null;
-    curSpeedBtn = null;
     speedDisplay = null;
     settingsOverlay = null;
-    exists = false;
   }
 
   function init() {
-    if (document.getElementById(P + "-cont")) {
-      exists = true;
-      return;
-    }
-    exists = false;
+    if (document.getElementById(P + "-cont")) return;
     videoEl = findVideo();
     if (!videoEl) {
       L("No video");
+      ensureObserver();
       return;
     }
     L(`Video: ${(videoEl.src || "").slice(0, 50) || "<inline>"}`);
@@ -1535,34 +2077,20 @@
       updateProgress();
       updateSpeedHighlight();
     }
-    // 确保 MutationObserver 活跃（SPA 页面切换后不会被清理断开）
-    if (!observer) {
-      observer = new MutationObserver(() => {
-        if (manualRefresh) return;
-        if (!videoEl || !document.body.contains(videoEl)) {
-          const newVid = findVideo();
-          if (newVid && newVid !== videoEl) {
-            L("New video detected");
-            cleanup();
-            setTimeout(init, 300);
-          }
-        }
-      });
-      observer.observe(document.body, { childList: true, subtree: true });
-    }
+    ensureObserver();
   }
 
-  function start() {
-    if (document.readyState === "loading") {
-      document.addEventListener("DOMContentLoaded", () =>
-        setTimeout(init, CONFIG.INIT_DELAY),
-      );
-    } else {
-      setTimeout(init, CONFIG.INIT_DELAY);
-    }
-    observer = new MutationObserver(() => {
+  // DOM 变动频繁时做防抖，避免每次 mutation 都全量扫描视频
+  function scheduleVideoCheck() {
+    if (videoCheckTimer) return;
+    videoCheckTimer = setTimeout(() => {
+      videoCheckTimer = null;
       if (manualRefresh) return;
       if (!videoEl || !document.body.contains(videoEl)) {
+        // 无视频页面也会频繁触发 mutation，限制为最多 1 秒扫描一次
+        const now = Date.now();
+        if (now - lastVideoScan < 1000) return;
+        lastVideoScan = now;
         const newVid = findVideo();
         if (newVid && newVid !== videoEl) {
           L("New video detected");
@@ -1570,10 +2098,32 @@
           setTimeout(init, 300);
         }
       }
-    });
+    }, 500);
+  }
+
+  // 保证 MutationObserver 存在（cleanup 之后重建，SPA 切换后也不会失效）
+  function ensureObserver() {
+    if (observer || !document.body) return;
+    observer = new MutationObserver(scheduleVideoCheck);
     observer.observe(document.body, { childList: true, subtree: true });
+  }
+
+  function start() {
+    const boot = () => {
+      ensureObserver();
+      setTimeout(init, CONFIG.INIT_DELAY);
+    };
+    if (document.readyState === "loading") {
+      document.addEventListener("DOMContentLoaded", boot, { once: true });
+    } else {
+      boot();
+    }
+    document.addEventListener("fullscreenchange", handleNativeFullscreen);
+    document.addEventListener("webkitfullscreenchange", handleNativeFullscreen);
     window.addEventListener("resize", () => {
-      if (controls) applyPosition();
+      if (!controls) return;
+      if (isFullscreen) repositionControlsInFullscreen();
+      else applyPosition();
     });
     window.addEventListener("beforeunload", cleanup);
   }
