@@ -39,7 +39,6 @@
         "-10": "-10s",
         10: "+10s",
         60: "+1m",
-        300: "+5m",
         600: "+10m",
       },
       BRIGHTNESS_BTN: "☀️",
@@ -53,7 +52,7 @@
       },
     },
     // 默认配置
-    DEFAULT_SPEEDS: [3.0, 2.5, 2.0, 1.5, 1.25, 1.0],
+    DEFAULT_SPEEDS: [ 1.5, 1.25, 1.0],
     // 倍速 +/- 按钮的调整步进（可在设置中修改）
     DEFAULT_SPEED_STEP: 0.5,
     // 倍速调整范围
@@ -63,7 +62,7 @@
     SEEK_MIN: -3600,
     SEEK_MAX: 3600,
     MAX_LIST_ITEMS: 12,
-    DEFAULT_SEEKS: [-600, -60, -10, 10, 60, 300, 600],
+    DEFAULT_SEEKS: [-600, -60, -10, 10, 60, 600],
     // 垂直面板中快进/快退按钮的上下排列：backward=快退在前，forward=快进在前
     DEFAULT_SEEK_ORDER_V: "backward",
     // 面板功能区块固定顺序（横/竖面板各自独立）
