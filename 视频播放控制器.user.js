@@ -1,8 +1,8 @@
 // ==UserScript==
 // @name         视频播放控制器
 // @namespace    http://tampermonkey.net/
-// @version      0.9.9
-// @description  可拖拽控制面板，快进/倍速按钮可增删改排序，竖版快退/快进上下方向可调，一键清空配置
+// @version      0.9.10
+// @description  可拖拽控制面板，快进/倍速按钮可增删改排序（横竖面板分别保存互不影响），竖版快退/快进上下方向可调，一键清空配置
 // @author       You
 // @match        *://*/*
 // @grant        GM_setValue
@@ -186,9 +186,12 @@
   let fsCheckPending = false; // 全屏检测的 rAF 节流标记
   let toastTimer = null;
   let cfg = {
-    speeds: [...CONFIG.DEFAULT_SPEEDS],
+    // 横/竖面板各自维护一份按钮列表，互不影响
+    speedsH: [...CONFIG.DEFAULT_SPEEDS],
+    speedsV: [...CONFIG.DEFAULT_SPEEDS],
+    seeksH: [...CONFIG.DEFAULT_SEEKS],
+    seeksV: [...CONFIG.DEFAULT_SEEKS],
     speedStep: CONFIG.DEFAULT_SPEED_STEP,
-    seeks: [...CONFIG.DEFAULT_SEEKS],
     seeksVer: CONFIG.SEEKS_VERSION,
     seekOrderV: CONFIG.DEFAULT_SEEK_ORDER_V,
     ui: { ...CONFIG.DEFAULT_UI },
@@ -207,37 +210,50 @@
           ? Math.max(rule.min, Math.min(rule.max, v))
           : fallback;
 
-      // 倍速候选：过滤损坏值、去重、限制数量，全部无效时回退默认
-      const speeds = [];
-      if (Array.isArray(p.speeds)) {
-        for (const v of p.speeds) {
-          if (typeof v !== "number" || !isFinite(v)) continue;
-          if (v < CONFIG.SPEED_MIN || v > CONFIG.SPEED_MAX) continue;
-          const value = Math.round(v * 100) / 100;
-          if (speeds.some((x) => Math.abs(x - value) < 1e-9)) continue;
-          speeds.push(value);
-          if (speeds.length >= CONFIG.MAX_LIST_ITEMS) break;
+      // 列表清洗：过滤损坏值、去重、限制数量
+      const sanitizeList = (arr, { min, max, integer }) => {
+        const out = [];
+        if (!Array.isArray(arr)) return out;
+        for (const v of arr) {
+          if (typeof v !== "number" || !isFinite(v) || v === 0) continue;
+          if (v < min || v > max) continue;
+          const value = integer ? Math.round(v) : Math.round(v * 100) / 100;
+          if (out.some((x) => Math.abs(x - value) < 1e-9)) continue;
+          out.push(value);
+          if (out.length >= CONFIG.MAX_LIST_ITEMS) break;
         }
-      }
-      cfg.speeds = speeds.length ? speeds : [...CONFIG.DEFAULT_SPEEDS];
+        return out;
+      };
+      const sanitizeSpeeds = (arr) =>
+        sanitizeList(arr, { min: CONFIG.SPEED_MIN, max: CONFIG.SPEED_MAX, integer: false });
+      const sanitizeSeeks = (arr) =>
+        sanitizeList(arr, { min: CONFIG.SEEK_MIN, max: CONFIG.SEEK_MAX, integer: true });
+
+      // 旧版存档只有一份 speeds/seeks，读取时同时作为横竖面板的初始值
+      const legacySpeeds = sanitizeSpeeds(p.speeds);
+      const legacySeeks =
+        p.seeksVer === CONFIG.SEEKS_VERSION ? sanitizeSeeks(p.seeks) : [];
+      const fallbackSpeeds = legacySpeeds.length
+        ? legacySpeeds
+        : [...CONFIG.DEFAULT_SPEEDS];
+      const fallbackSeeks = legacySeeks.length
+        ? legacySeeks
+        : [...CONFIG.DEFAULT_SEEKS];
+
+      const speedsH = sanitizeSpeeds(p.speedsH);
+      const speedsV = sanitizeSpeeds(p.speedsV);
+      const seeksH = sanitizeSeeks(p.seeksH);
+      const seeksV = sanitizeSeeks(p.seeksV);
+      cfg.speedsH = speedsH.length ? speedsH : [...fallbackSpeeds];
+      cfg.speedsV = speedsV.length ? speedsV : [...fallbackSpeeds];
+      cfg.seeksH = seeksH.length ? seeksH : [...fallbackSeeks];
+      cfg.seeksV = seeksV.length ? seeksV : [...fallbackSeeks];
       cfg.speedStep = clamp(
         p.speedStep,
         CONFIG.VALIDATORS.speedStep,
         CONFIG.DEFAULT_SPEED_STEP,
       );
 
-      const seeks = [];
-      if (Array.isArray(p.seeks) && p.seeksVer === CONFIG.SEEKS_VERSION) {
-        for (const v of p.seeks) {
-          if (typeof v !== "number" || !isFinite(v) || v === 0) continue;
-          if (v < CONFIG.SEEK_MIN || v > CONFIG.SEEK_MAX) continue;
-          const value = Math.round(v);
-          if (seeks.some((x) => Math.abs(x - value) < 1e-9)) continue;
-          seeks.push(value);
-          if (seeks.length >= CONFIG.MAX_LIST_ITEMS) break;
-        }
-      }
-      cfg.seeks = seeks.length ? seeks : [...CONFIG.DEFAULT_SEEKS];
       cfg.seeksVer = CONFIG.SEEKS_VERSION;
       cfg.seekOrderV =
         p.seekOrderV === "forward" ? "forward" : CONFIG.DEFAULT_SEEK_ORDER_V;
@@ -292,9 +308,11 @@
       L("Config clear error: " + e);
     }
     cfg = {
-      speeds: [...CONFIG.DEFAULT_SPEEDS],
+      speedsH: [...CONFIG.DEFAULT_SPEEDS],
+      speedsV: [...CONFIG.DEFAULT_SPEEDS],
+      seeksH: [...CONFIG.DEFAULT_SEEKS],
+      seeksV: [...CONFIG.DEFAULT_SEEKS],
       speedStep: CONFIG.DEFAULT_SPEED_STEP,
-      seeks: [...CONFIG.DEFAULT_SEEKS],
       seeksVer: CONFIG.SEEKS_VERSION,
       seekOrderV: CONFIG.DEFAULT_SEEK_ORDER_V,
       ui: { ...CONFIG.DEFAULT_UI },
@@ -670,7 +688,7 @@
   }
 
   function renderSeekRow(container) {
-    cfg.seeks.forEach((val) => {
+    cfg.seeksH.forEach((val) => {
       container.appendChild(createSeekButton(val));
     });
   }
@@ -748,7 +766,7 @@
       createSpeedDisplay(),
       createSpeedAdjustBtn(1),
     );
-    cfg.speeds.forEach((sp) => container.appendChild(createSpeedButton(sp)));
+    cfg.speedsH.forEach((sp) => container.appendChild(createSpeedButton(sp)));
   }
 
   // ============ 列表编辑器（快进/倍速按钮的增删改与排序） ============
@@ -847,6 +865,11 @@
         Array.from(list.children).map((row) =>
           parseFloat(row.querySelector("input").value),
         ),
+      // 切换配置对象时整表替换，用于在横/竖面板列表之间切换
+      setValues: (vals) => {
+        list.textContent = "";
+        vals.forEach((v) => list.appendChild(createRow(v)));
+      },
     };
   }
 
@@ -981,6 +1004,45 @@
 
     uiSection.append(uiTitle, opacityRow, fontRow, btnSizeRow);
 
+    // ============ 配置对象（横/竖面板各自独立） ============
+    const layoutSection = document.createElement("div");
+    layoutSection.style.cssText = CONFIG.STYLE.SECTION;
+    const layoutTitle = document.createElement("h4");
+    layoutTitle.textContent = "🧭 配置对象";
+    layoutTitle.style.cssText = CONFIG.STYLE.SECTION_TITLE;
+
+    let editLayout = isVertical ? "v" : "h";
+    const layoutRow = document.createElement("div");
+    layoutRow.style.cssText = "display:flex;gap:16px;flex-wrap:wrap;margin:8px 0";
+    const makeLayoutLabel = (value, text) => {
+      const label = document.createElement("label");
+      label.style.cssText =
+        "display:flex;align-items:center;gap:4px;cursor:pointer;font-size:13px";
+      const radio = document.createElement("input");
+      radio.type = "radio";
+      radio.name = P + "-editLayout";
+      radio.value = value;
+      radio.checked = editLayout === value;
+      label.append(radio, text);
+      return { label, radio };
+    };
+    const hLayoutOpt = makeLayoutLabel("h", "水平面板");
+    const vLayoutOpt = makeLayoutLabel("v", "垂直面板");
+    layoutRow.append(hLayoutOpt.label, vLayoutOpt.label);
+
+    const layoutHint = document.createElement("p");
+    layoutHint.textContent =
+      "快进/倍速按钮列表按面板布局分别保存，修改其中一种布局不会影响另一种";
+    layoutHint.style.cssText =
+      "margin:4px 0 0;color:#888;font-size:12px;line-height:1.5";
+    layoutSection.append(layoutTitle, layoutRow, layoutHint);
+
+    // 两种布局的编辑草稿（切换配置对象时保留尚未保存的修改）
+    const drafts = {
+      h: { speeds: [...cfg.speedsH], seeks: [...cfg.seeksH] },
+      v: { speeds: [...cfg.speedsV], seeks: [...cfg.seeksV] },
+    };
+
     // ============ 倍速设置区域 ============
     const speedSection = document.createElement("div");
     speedSection.style.cssText = CONFIG.STYLE.SECTION;
@@ -1011,7 +1073,7 @@
     const speedEditor = createListEditor({
       title: "🎚 倍速按钮",
       hint: "按列表顺序显示在面板上；取值范围 0.1x ~ 16x",
-      values: [...cfg.speeds],
+      values: [...drafts[editLayout].speeds],
       min: CONFIG.SPEED_MIN,
       max: CONFIG.SPEED_MAX,
       step: 0.05,
@@ -1031,7 +1093,7 @@
     const seekEditor = createListEditor({
       title: "⏩ 快进按钮",
       hint: "数值单位为秒，负数表示快退；按列表顺序显示在面板上",
-      values: [...cfg.seeks],
+      values: [...drafts[editLayout].seeks],
       min: CONFIG.SEEK_MIN,
       max: CONFIG.SEEK_MAX,
       step: 1,
@@ -1049,6 +1111,30 @@
 
     speedEditor.section.id = P + "-speed-editor";
     seekEditor.section.id = P + "-seek-editor";
+
+    // 切换配置对象：先把当前界面值写入草稿，再载入目标布局的草稿
+    const captureDraft = () => {
+      drafts[editLayout].speeds = speedEditor.getValues();
+      drafts[editLayout].seeks = seekEditor.getValues();
+    };
+    const loadDraft = () => {
+      speedEditor.setValues(drafts[editLayout].speeds);
+      seekEditor.setValues(drafts[editLayout].seeks);
+    };
+    const selectLayout = (layout) => {
+      if (layout === editLayout) return;
+      captureDraft();
+      editLayout = layout;
+      hLayoutOpt.radio.checked = layout === "h";
+      vLayoutOpt.radio.checked = layout === "v";
+      loadDraft();
+    };
+    hLayoutOpt.radio.addEventListener("change", () => {
+      if (hLayoutOpt.radio.checked) selectLayout("h");
+    });
+    vLayoutOpt.radio.addEventListener("change", () => {
+      if (vLayoutOpt.radio.checked) selectLayout("v");
+    });
 
     // 垂直面板内快进/快退按钮的上下方向（放在快进按钮列表下方）
     const seekOrderWrap = document.createElement("div");
@@ -1251,6 +1337,7 @@
     dlg.append(
       header,
       uiSection,
+      layoutSection,
       speedSection,
       speedEditor.section,
       seekEditor.section,
@@ -1289,32 +1376,55 @@
 
     // 保存逻辑
     saveBtn.onclick = () => {
-      // 先校验快进/倍速列表，有误则不落盘、不关闭面板
-      const seeksResult = collectEditorValues(seekEditor, {
-        min: CONFIG.SEEK_MIN,
-        max: CONFIG.SEEK_MAX,
-        decimals: 0,
-        allowZero: false,
-        label: "快进按钮",
-      });
-      if (seeksResult.error) {
-        showToast(seeksResult.error, "error");
+      // 先把当前编辑的布局内容写入草稿，确保校验的是最新界面值
+      captureDraft();
+
+      // 横/竖两种布局分别校验；出错时自动切换到对应布局提示
+      const validateLayout = (layout) => {
+        const name = layout === "v" ? "垂直面板" : "水平面板";
+        const seeksResult = collectEditorValues(
+          { getValues: () => drafts[layout].seeks },
+          {
+            min: CONFIG.SEEK_MIN,
+            max: CONFIG.SEEK_MAX,
+            decimals: 0,
+            allowZero: false,
+            label: `${name}快进按钮`,
+          },
+        );
+        if (seeksResult.error) return seeksResult;
+        const speedsResult = collectEditorValues(
+          { getValues: () => drafts[layout].speeds },
+          {
+            min: CONFIG.SPEED_MIN,
+            max: CONFIG.SPEED_MAX,
+            decimals: 2,
+            allowZero: false,
+            label: `${name}倍速按钮`,
+          },
+        );
+        if (speedsResult.error) return speedsResult;
+        return { seeks: seeksResult.values, speeds: speedsResult.values };
+      };
+
+      const hResult = validateLayout("h");
+      if (hResult.error) {
+        selectLayout("h");
+        showToast(hResult.error, "error");
         return;
       }
-      const speedsResult = collectEditorValues(speedEditor, {
-        min: CONFIG.SPEED_MIN,
-        max: CONFIG.SPEED_MAX,
-        decimals: 2,
-        allowZero: false,
-        label: "倍速按钮",
-      });
-      if (speedsResult.error) {
-        showToast(speedsResult.error, "error");
+      const vResult = validateLayout("v");
+      if (vResult.error) {
+        selectLayout("v");
+        showToast(vResult.error, "error");
         return;
       }
+
       const listChanged =
-        seeksResult.values.join(",") !== cfg.seeks.join(",") ||
-        speedsResult.values.join(",") !== cfg.speeds.join(",");
+        hResult.seeks.join(",") !== cfg.seeksH.join(",") ||
+        hResult.speeds.join(",") !== cfg.speedsH.join(",") ||
+        vResult.seeks.join(",") !== cfg.seeksV.join(",") ||
+        vResult.speeds.join(",") !== cfg.speedsV.join(",");
       const checkedSeekOrder = document.querySelector(
         `input[name="${P}-seekOrderV"]:checked`,
       );
@@ -1379,8 +1489,10 @@
       }
 
       // 保存并应用
-      cfg.seeks = seeksResult.values;
-      cfg.speeds = speedsResult.values;
+      cfg.seeksH = hResult.seeks;
+      cfg.speedsH = hResult.speeds;
+      cfg.seeksV = vResult.seeks;
+      cfg.speedsV = vResult.speeds;
       cfg.seekOrderV = nextSeekOrderV;
       saveConfig();
       GM_setValue(P + "_pos", JSON.stringify(lastPos));
@@ -1693,7 +1805,7 @@
   function createSpeedColumn() {
     const col = document.createElement("div");
     col.style.cssText = CONFIG.STYLE.VERT_COL;
-    cfg.speeds.forEach((sp) =>
+    cfg.speedsV.forEach((sp) =>
       col.appendChild(createSpeedButton(sp, true)),
     );
     col.append(
@@ -1709,8 +1821,8 @@
     col.setAttribute("data-seek", "");
     col.style.cssText = CONFIG.STYLE.VERT_COL;
     // 按方向分组后再决定上下顺序，同一方向内仍保持列表中的顺序
-    const backward = cfg.seeks.filter((v) => v < 0);
-    const forward = cfg.seeks.filter((v) => v > 0);
+    const backward = cfg.seeksV.filter((v) => v < 0);
+    const forward = cfg.seeksV.filter((v) => v > 0);
     const ordered =
       cfg.seekOrderV === "forward"
         ? forward.concat(backward)
